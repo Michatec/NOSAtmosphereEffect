@@ -46,6 +46,16 @@ class EffectSelectionActivity : AppCompatActivity() {
             id = "HALFTONE_REVERSE",
             title = "Halftone Print (Reverse)",
             description = "Wake up: Halftone ➔ Sharp\nRetro aesthetic. CMYK dots seamlessly expand into continuous color."
+        ),
+        EffectItem(
+            id = "COLORFILL",
+            title = "Color Fill",
+            description = "Wake up: B&W ➔ Color\nLiquid awakening. Colors flow outward from your fingerprint."
+        ),
+        EffectItem(
+            id = "COLORFILL_REVERSE",
+            title = "Color Fill (Reverse)",
+            description = "Wake up: Color ➔ B&W\nFluid drain. Colors wash away into grayscale."
         )
     )
 
@@ -75,7 +85,6 @@ class EffectSelectionActivity : AppCompatActivity() {
                 showSelectionDialog() // Old behavior for 1st time
             }
         }
-        recyclerView.adapter = adapter
         recyclerView.adapter = adapter
     }
 
@@ -107,7 +116,7 @@ class EffectSelectionActivity : AppCompatActivity() {
     }
 
     private fun launchMultiCropActivity(uris: ArrayList<Uri>) {
-        val intent = Intent(this, PlaylistEditorActivity::class.java) // CHANGED HERE
+        val intent = Intent(this, PlaylistEditorActivity::class.java)
 
         intent.data = uris[0]
         val clipData = ClipData.newUri(contentResolver, "Images", uris[0])
@@ -129,6 +138,8 @@ class EffectSelectionActivity : AppCompatActivity() {
             "FROSTED_REVERSE" -> com.app.nosatmosphereeffect.service.FrostedReverseService::class.java
             "HALFTONE" -> com.app.nosatmosphereeffect.service.HalftoneService::class.java
             "HALFTONE_REVERSE" -> com.app.nosatmosphereeffect.service.HalftoneReverseService::class.java
+            "COLORFILL" -> com.app.nosatmosphereeffect.service.ColorFillService::class.java
+            "COLORFILL_REVERSE" -> com.app.nosatmosphereeffect.service.ColorFillReverseService::class.java
             else -> com.app.nosatmosphereeffect.service.AtmosphereService::class.java
         }
         val intent = Intent(android.app.WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER)

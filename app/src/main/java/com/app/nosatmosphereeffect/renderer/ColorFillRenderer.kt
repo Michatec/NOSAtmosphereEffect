@@ -15,11 +15,12 @@ import java.nio.FloatBuffer
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 
-class HalftoneRenderer(
+class ColorFillRenderer(
     private val context: Context,
     private val isReverse: Boolean = false
 ) : GLSurfaceView.Renderer {
 
+    // --- RAM Optimized Ring Buffer Logic ---
     private class TextureSet {
         var sharpId = 0
         fun isValid() = sharpId != 0
@@ -28,14 +29,16 @@ class HalftoneRenderer(
 
     private var currentSet = TextureSet()
     private var nextSet = TextureSet()
-
     @Volatile private var pendingPlaylistBitmap: Bitmap? = null
 
     var blurStrength: Float = 0.0f
     @Volatile var dimLevel: Float = 0.0f
     @Volatile private var needsReload: Boolean = false
-    @Volatile var dotSize: Float = 12.0f
-    @Volatile var grayscale: Boolean = false
+
+    // User-adjustable fingerprint origin coordinates (0.0 to 1.0)
+    // Default is bottom center.
+    @Volatile var originX: Float = 0.5f
+    @Volatile var originY: Float = 0.8f
 
     private var programId: Int = 0
     private var aspectRatio: Float = 1.0f
@@ -63,11 +66,11 @@ class HalftoneRenderer(
             .put(vertices)
         vertexBuffer.position(0)
 
-        val vertexCode = loadShaderFromAssets("shaders/halftone/halftone.vert")
+        val vertexCode = loadShaderFromAssets("shaders/colorfill/colorfill.vert")
         val fragmentCode = if (isReverse) {
-            loadShaderFromAssets("shaders/halftone/sharp_to_halftone.frag")
+            loadShaderFromAssets("shaders/colorfill/color_to_bw.frag")
         } else {
-            loadShaderFromAssets("shaders/halftone/halftone_to_sharp.frag")
+            loadShaderFromAssets("shaders/colorfill/bw_to_color.frag")
         }
 
         programId = createProgram(vertexCode, fragmentCode)
@@ -87,11 +90,11 @@ class HalftoneRenderer(
     private fun processPlaylistTransition() {
         val bitmap = pendingPlaylistBitmap ?: return
 
-        // Overwrite the existing nextSet.sharpId instead of deleting it
+        // RAM FIX: Overwrite the existing nextSet.sharpId instead of deleting it
         nextSet.sharpId = uploadTexture(bitmap, nextSet.sharpId)
         bitmap.recycle()
 
-        // SWAP! Old current becomes next
+        // Swap Pointers
         val temp = currentSet
         currentSet = nextSet
         nextSet = temp
@@ -119,16 +122,18 @@ class HalftoneRenderer(
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
         GLES30.glUseProgram(programId)
 
+        // Pass Uniforms
         GLES30.glUniform1f(GLES30.glGetUniformLocation(programId, "uAspectRatio"), aspectRatio)
         GLES30.glUniform1f(GLES30.glGetUniformLocation(programId, "uBlurStrength"), blurStrength)
-        GLES30.glUniform1f(GLES30.glGetUniformLocation(programId, "uDotSize"), dotSize)
-        GLES30.glUniform1f(GLES30.glGetUniformLocation(programId, "uGrayscale"), if (grayscale) 1.0f else 0.0f)
         GLES30.glUniform1f(GLES30.glGetUniformLocation(programId, "uDimLevel"), dimLevel)
+        GLES30.glUniform2f(GLES30.glGetUniformLocation(programId, "uOrigin"), originX, originY)
 
+        // Bind Texture
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, currentSet.sharpId)
         GLES30.glUniform1i(GLES30.glGetUniformLocation(programId, "uTextureSharp"), 0)
 
+        // Draw Quad
         val aPosLoc = GLES30.glGetAttribLocation(programId, "aPosition")
         val aTexLoc = GLES30.glGetAttribLocation(programId, "aTexCoord")
 
@@ -149,7 +154,6 @@ class HalftoneRenderer(
     private fun uploadTexture(bitmap: Bitmap, existingTextureId: Int = 0): Int {
         val textureHandle = if (existingTextureId != 0) intArrayOf(existingTextureId) else { val arr = IntArray(1); GLES30.glGenTextures(1, arr, 0); arr }
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, textureHandle[0])
-        // Keep mipmaps for Halftone!
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR_MIPMAP_LINEAR)
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)

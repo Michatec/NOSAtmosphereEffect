@@ -12,7 +12,7 @@ Atmo Engine is available to download from the Orion Store and F-Droid.
 ## ⚠️ Device Support & Disclaimer
 
 **Current Testing Status:**
-This application has currently been tested **exclusively on the Samsung Galaxy S25 Ultra**.
+This application has currently been tested **exclusively on the Samsung Galaxy S25 Ultra and Nothing Phone 1**.
 
 While it may work on other Android devices running Android 13+ (API 33+), behavior on different manufacturers' skins (FuntouchOS, OxygenOS, etc.) is not guaranteed.
 
@@ -30,6 +30,8 @@ Open the app and choose your desired atmosphere style from the selection screen:
 * **Simple Frosted (Reverse):** Elegant clarity. Wakes up from a heavy frosted blur into a crystal clear wallpaper.
 * **Halftone Print:** Retro aesthetic. Sharp view dissolves into comic-book CMYK dots when locked.
 * **Halftone Print (Reverse):** Retro aesthetic. CMYK dots seamlessly expand into continuous color when unlocked.
+* **Color Fill:** Liquid awakening. Colors flow outward from your fingerprint.
+* **Color Fill (Reverse):** Fluid drain. Colors wash away into grayscale.
 
 
 ### 2\. Select Image & Playlist Mode
@@ -65,6 +67,7 @@ Take full control of the animation and look. You can now tweak the following set
     * **Noise Scale:** The size/coarseness of the grain particles.
 * **Halftone Pixel Size:** (Halftone Effects Only) Dynamically adjust the size of the printed dots. Setting this to `0` renders the original continuous tones instead of dots.
 * **Black & White Effect:** (Halftone Effects Only) Converts the CMYK color halftone pattern into a single-channel grayscale newspaper print.
+* **Fingerprint Location:** (Color Fill Effects Only) Two sliders to adjust the horizontal and vertical position of effect start place sync with the fingerprint location.
 ### Animation & Behavior
 * **Animation Duration:** Control the total transition duration.
 * **Lock Delay (Anti-Flicker):** Adds a configurable pause before the wallpaper resets when you lock the phone. This prevents the visual glitch where the wallpaper "snaps" back to its initial state before the screen turns fully black.
@@ -111,7 +114,7 @@ git clone https://github.com/yourusername/NOSAtmosphereEffect.git
 ## Author
 
 **Saad Ullah Khan**
-📍 Saudi Arabia
+📍 Passau, Germany
 📧 [khansaad45678900@gmail.com](mailto:khansaad45678900@gmail.com)
 🔗 [LinkedIn](https://www.linkedin.com/in/saadullahkhan456)
 💻 [GitHub](https://github.com/saad-khan-rind)
@@ -120,6 +123,10 @@ git clone https://github.com/yourusername/NOSAtmosphereEffect.git
 ## License
 
 This project is open-source and available under the [MIT License](LICENSE).
+
+## Privacy Policy
+
+The privacy policy is [this](https://saad-khan-rind.github.io/NOSAtmosphereEffect/privacy-policy).
 
 ---
 

@@ -36,10 +36,12 @@ class BlurToSharpRenderer(private val context: Context) : GLSurfaceView.Renderer
     @Volatile private var pendingPlaylistBitmap: Bitmap? = null
     // -------------------------
 
+    // --- RAM FIX: Cached Buffer for Pixel Reading ---
+    private var cachedDownloadBuffer: ByteBuffer? = null
+    // ------------------------------------------------
+
     var blurStrength: Float = 0.0f
         set(value) {
-            // When the animation finishes (hits 0.0/Sharp), we randomize the blobs
-            // so the NEXT lock screen (1.0/Blur) looks different.
             if (value == 0.0f && field != 0.0f) {
                 reRollTargets()
             }
@@ -162,46 +164,26 @@ class BlurToSharpRenderer(private val context: Context) : GLSurfaceView.Renderer
         blurredBitmap.recycle()
     }
 
-    // NEW: Ring Buffer Swapping Logic
     private fun processPlaylistTransition() {
         val bitmap = pendingPlaylistBitmap ?: return
 
-        // 1. Clean up the "Next" set if it has garbage (recycle bin)
-        if (nextSet.isValid()) {
-            val ids = intArrayOf(nextSet.sharpId, nextSet.blurId)
-            GLES30.glDeleteTextures(2, ids, 0)
-            nextSet.reset()
-        }
+        // Overwrite the existing nextSet IDs instead of deleting them
+        nextSet.sharpId = uploadTexture(bitmap, nextSet.sharpId)
+        tempTextureId = createEmptyTexture(bitmap.width, bitmap.height, tempTextureId)
+        nextSet.blurId = gpuBlur(nextSet.sharpId, bitmap.width, bitmap.height, 200f, nextSet.blurId)
 
-        // 2. Load new wallpaper into "Next" Set
-        nextSet.sharpId = uploadTexture(bitmap)
-
-        // 3. Ensure temp texture matches size (Recreate if size changed)
-        // Note: For simplicity, we recreate temp if we want to be safe, or reuse if size match.
-        // Let's safe-recreate temp to handle different aspect ratios in playlist
-        if (tempTextureId != 0) {
-            GLES30.glDeleteTextures(1, intArrayOf(tempTextureId), 0)
-        }
-        tempTextureId = createEmptyTexture(bitmap.width, bitmap.height)
-
-        // 4. Generate Blur for "Next" Set
-        nextSet.blurId = gpuBlur(nextSet.sharpId, bitmap.width, bitmap.height, 200f)
-
-        // 5. Calculate Physics/Blobs for new wallpaper
         val blurredBitmap = downloadTexture(nextSet.blurId, bitmap.width, bitmap.height)
         initBaseBlobs(blurredBitmap)
+
         blurredBitmap.recycle()
         bitmap.recycle() // Done with raw bitmap
 
-        // 6. THE SWAP! (Pointer switch)
+        // SWAP! Old current becomes next
         val temp = currentSet
         currentSet = nextSet
-        nextSet = temp // Old current becomes next (garbage for next cycle)
+        nextSet = temp
 
-        // 7. Clear pending flag
         pendingPlaylistBitmap = null
-
-        // 8. Trigger reroll of targets for smooth transition
         reRollTargets()
     }
 
@@ -291,8 +273,6 @@ class BlurToSharpRenderer(private val context: Context) : GLSurfaceView.Renderer
     }
 
     override fun onDrawFrame(gl: GL10?) {
-
-        // CHECK FOR PLAYLIST SWAP
         if (pendingPlaylistBitmap != null) {
             processPlaylistTransition()
         }
@@ -302,7 +282,6 @@ class BlurToSharpRenderer(private val context: Context) : GLSurfaceView.Renderer
             loadAndApplyTextures()
         }
 
-        // SAFETY: If no texture is loaded, skip
         if (!currentSet.isValid()) {
             GLES30.glClearColor(0f, 0f, 0f, 1f)
             GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
@@ -355,7 +334,6 @@ class BlurToSharpRenderer(private val context: Context) : GLSurfaceView.Renderer
         GLES30.glUniform1f(GLES30.glGetUniformLocation(programId, "uSaturation"), blobSaturation)
         GLES30.glUniform1f(GLES30.glGetUniformLocation(programId, "uContrast"), blobContrast)
 
-        // BIND CURRENT SET
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, currentSet.sharpId)
         GLES30.glUniform1i(GLES30.glGetUniformLocation(programId, "uTextureSharp"), 0)
@@ -369,8 +347,8 @@ class BlurToSharpRenderer(private val context: Context) : GLSurfaceView.Renderer
         drawQuad(aPosLoc, aTexLoc)
     }
 
-    private fun createEmptyTexture(width: Int, height: Int): Int {
-        val t = IntArray(1); GLES30.glGenTextures(1, t, 0)
+    private fun createEmptyTexture(width: Int, height: Int, existingTextureId: Int = 0): Int {
+        val t = if (existingTextureId != 0) intArrayOf(existingTextureId) else { val arr = IntArray(1); GLES30.glGenTextures(1, arr, 0); arr }
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, t[0])
         GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA, width, height, 0, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, null)
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
@@ -380,8 +358,8 @@ class BlurToSharpRenderer(private val context: Context) : GLSurfaceView.Renderer
         return t[0]
     }
 
-    private fun gpuBlur(inputTexture: Int, width: Int, height: Int, radius: Float): Int {
-        val outputTexture = createEmptyTexture(width, height)
+    private fun gpuBlur(inputTexture: Int, width: Int, height: Int, radius: Float, targetOutputId: Int = 0): Int {
+        val outputTexture = createEmptyTexture(width, height, targetOutputId)
         GLES30.glUseProgram(blurProgramId)
         val aPosLoc = GLES30.glGetAttribLocation(blurProgramId, "aPosition")
         val aTexLoc = GLES30.glGetAttribLocation(blurProgramId, "aTexCoord")
@@ -415,7 +393,13 @@ class BlurToSharpRenderer(private val context: Context) : GLSurfaceView.Renderer
     }
 
     private fun downloadTexture(textureId: Int, width: Int, height: Int): Bitmap {
-        val buffer = ByteBuffer.allocateDirect(width * height * 4)
+        val requiredSize = width * height * 4
+        if (cachedDownloadBuffer == null || cachedDownloadBuffer!!.capacity() != requiredSize) {
+            cachedDownloadBuffer = ByteBuffer.allocateDirect(requiredSize)
+        }
+        val buffer = cachedDownloadBuffer!!
+        buffer.clear()
+
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, fboId)
         GLES30.glFramebufferTexture2D(GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0, GLES30.GL_TEXTURE_2D, textureId, 0)
         GLES30.glReadPixels(0, 0, width, height, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, buffer)
@@ -426,9 +410,8 @@ class BlurToSharpRenderer(private val context: Context) : GLSurfaceView.Renderer
         return bitmap
     }
 
-    private fun uploadTexture(bitmap: Bitmap): Int {
-        val textureHandle = IntArray(1)
-        GLES30.glGenTextures(1, textureHandle, 0)
+    private fun uploadTexture(bitmap: Bitmap, existingTextureId: Int = 0): Int {
+        val textureHandle = if (existingTextureId != 0) intArrayOf(existingTextureId) else { val arr = IntArray(1); GLES30.glGenTextures(1, arr, 0); arr }
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, textureHandle[0])
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)

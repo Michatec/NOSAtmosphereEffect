@@ -121,6 +121,37 @@
                 android:name="android.service.wallpaper"
                 android:resource="@xml/wallpaper" />
         </service>
+
+
+        <service
+            android:name=".service.ColorFillService"
+            android:enabled="true"
+            android:exported="true"
+            android:label="Color Fill Effect"
+            android:permission="android.permission.BIND_WALLPAPER">
+            <intent-filter>
+                <action android:name="android.service.wallpaper.WallpaperService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.wallpaper"
+                android:resource="@xml/wallpaper" />
+        </service>
+
+
+        <service
+            android:name=".service.ColorFillReverseService"
+            android:enabled="true"
+            android:exported="true"
+            android:label="Color Fill (Reverse) Effect"
+            android:permission="android.permission.BIND_WALLPAPER">
+            <intent-filter>
+                <action android:name="android.service.wallpaper.WallpaperService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.wallpaper"
+                android:resource="@xml/wallpaper" />
+        </service>
+
     </application>
 
 </manifest>

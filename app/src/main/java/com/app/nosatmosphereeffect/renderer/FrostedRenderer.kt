@@ -31,7 +31,6 @@ class FrostedRenderer(private val context: Context) : GLSurfaceView.Renderer {
     @Volatile private var pendingPlaylistBitmap: Bitmap? = null
     // -------------------------
 
-
     var blurStrength: Float = 0.0f
         set(value) {
             field = value
@@ -115,7 +114,6 @@ class FrostedRenderer(private val context: Context) : GLSurfaceView.Renderer {
             GLES30.glDeleteTextures(2, ids, 0)
             currentSet.reset()
         }
-        // Destroy temp if exists
         if (tempTextureId != 0) {
             GLES30.glDeleteTextures(1, intArrayOf(tempTextureId), 0)
             tempTextureId = 0
@@ -123,7 +121,6 @@ class FrostedRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
         val sharpBitmap = loadFixedWallpaper()
 
-        // Populate Current Set
         currentSet.sharpId = uploadTexture(sharpBitmap)
         tempTextureId = createEmptyTexture(sharpBitmap.width, sharpBitmap.height)
 
@@ -135,42 +132,28 @@ class FrostedRenderer(private val context: Context) : GLSurfaceView.Renderer {
         sharpBitmap.recycle()
     }
 
-    // NEW: Ring Buffer Swapping Logic
     private fun processPlaylistTransition() {
         val bitmap = pendingPlaylistBitmap ?: return
 
-        // 1. Clean up the "Next" set if it has garbage (recycle bin)
-        if (nextSet.isValid()) {
-            val ids = intArrayOf(nextSet.sharpId, nextSet.blurId)
-            GLES30.glDeleteTextures(2, ids, 0)
-            nextSet.reset()
+        // Overwrite the existing nextSet IDs instead of deleting them
+        nextSet.sharpId = uploadTexture(bitmap, nextSet.sharpId)
+        tempTextureId = createEmptyTexture(bitmap.width, bitmap.height, tempTextureId)
+
+        if (blurRadius < 1.0f) {
+            nextSet.blurId = uploadTexture(bitmap, nextSet.blurId)
+        } else {
+            nextSet.blurId = gpuBlur(nextSet.sharpId, bitmap.width, bitmap.height, blurRadius, nextSet.blurId)
         }
-
-        // 2. Load new wallpaper into "Next" Set
-        nextSet.sharpId = uploadTexture(bitmap)
-
-        // 3. Ensure temp texture matches size (Recreate if size changed)
-        // Note: For simplicity, we recreate temp if we want to be safe, or reuse if size match.
-        // Let's safe-recreate temp to handle different aspect ratios in playlist
-        if (tempTextureId != 0) {
-            GLES30.glDeleteTextures(1, intArrayOf(tempTextureId), 0)
-        }
-        tempTextureId = createEmptyTexture(bitmap.width, bitmap.height)
-
-        // 4. Generate Blur for "Next" Set
-        nextSet.blurId = gpuBlur(nextSet.sharpId, bitmap.width, bitmap.height, blurRadius)
 
         bitmap.recycle() // Done with raw bitmap
 
-        // 5. THE SWAP! (Pointer switch)
+        // SWAP! Old current becomes next
         val temp = currentSet
         currentSet = nextSet
-        nextSet = temp // Old current becomes next (garbage for next cycle)
+        nextSet = temp
 
-        // 7. Clear pending flag
         pendingPlaylistBitmap = null
     }
-
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
         GLES30.glViewport(0, 0, width, height)
@@ -178,8 +161,6 @@ class FrostedRenderer(private val context: Context) : GLSurfaceView.Renderer {
     }
 
     override fun onDrawFrame(gl: GL10?) {
-
-        // CHECK FOR PLAYLIST SWAP
         if (pendingPlaylistBitmap != null) {
             processPlaylistTransition()
         }
@@ -189,7 +170,6 @@ class FrostedRenderer(private val context: Context) : GLSurfaceView.Renderer {
             loadAndApplyTextures()
         }
 
-        // SAFETY: If no texture is loaded, skip
         if (!currentSet.isValid()) {
             GLES30.glClearColor(0f, 0f, 0f, 1f)
             GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
@@ -199,9 +179,6 @@ class FrostedRenderer(private val context: Context) : GLSurfaceView.Renderer {
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
         GLES30.glUseProgram(programId)
 
-
-
-        // MOVEMENT CURVE: Fast Start, Slow Settle
         GLES30.glUniform1f(GLES30.glGetUniformLocation(programId, "uAspectRatio"), aspectRatio)
         GLES30.glUniform1f(GLES30.glGetUniformLocation(programId, "uBlurStrength"), blurStrength)
         GLES30.glUniform1f(GLES30.glGetUniformLocation(programId, "uDimLevel"), dimLevel)
@@ -209,7 +186,6 @@ class FrostedRenderer(private val context: Context) : GLSurfaceView.Renderer {
         GLES30.glUniform1f(GLES30.glGetUniformLocation(programId, "uNoiseScale"), noiseScale)
         GLES30.glUniform1f(GLES30.glGetUniformLocation(programId, "uNoiseStrength"), noiseStrength)
 
-        // BIND CURRENT SET
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, currentSet.sharpId)
         GLES30.glUniform1i(GLES30.glGetUniformLocation(programId, "uTextureSharp"), 0)
@@ -223,8 +199,8 @@ class FrostedRenderer(private val context: Context) : GLSurfaceView.Renderer {
         drawQuad(aPosLoc, aTexLoc)
     }
 
-    private fun createEmptyTexture(width: Int, height: Int): Int {
-        val t = IntArray(1); GLES30.glGenTextures(1, t, 0)
+    private fun createEmptyTexture(width: Int, height: Int, existingTextureId: Int = 0): Int {
+        val t = if (existingTextureId != 0) intArrayOf(existingTextureId) else { val arr = IntArray(1); GLES30.glGenTextures(1, arr, 0); arr }
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, t[0])
         GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA, width, height, 0, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, null)
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
@@ -234,8 +210,8 @@ class FrostedRenderer(private val context: Context) : GLSurfaceView.Renderer {
         return t[0]
     }
 
-    private fun gpuBlur(inputTexture: Int, width: Int, height: Int, radius: Float): Int {
-        val outputTexture = createEmptyTexture(width, height)
+    private fun gpuBlur(inputTexture: Int, width: Int, height: Int, radius: Float, targetOutputId: Int = 0): Int {
+        val outputTexture = createEmptyTexture(width, height, targetOutputId)
         GLES30.glUseProgram(blurProgramId)
         val aPosLoc = GLES30.glGetAttribLocation(blurProgramId, "aPosition")
         val aTexLoc = GLES30.glGetAttribLocation(blurProgramId, "aTexCoord")
@@ -269,10 +245,10 @@ class FrostedRenderer(private val context: Context) : GLSurfaceView.Renderer {
         GLES30.glDisableVertexAttribArray(aTexLoc)
     }
 
-    private fun uploadTexture(bitmap: Bitmap): Int {
-        val textureHandle = IntArray(1)
-        GLES30.glGenTextures(1, textureHandle, 0)
+    private fun uploadTexture(bitmap: Bitmap, existingTextureId: Int = 0): Int {
+        val textureHandle = if (existingTextureId != 0) intArrayOf(existingTextureId) else { val arr = IntArray(1); GLES30.glGenTextures(1, arr, 0); arr }
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, textureHandle[0])
+        // Keep mipmaps for Frosted!
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR_MIPMAP_LINEAR)
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
@@ -311,10 +287,8 @@ class FrostedRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 return bitmap
             }
         }
-
         val fallback = createBitmap(1080, 1920)
         fallback.eraseColor(Color.BLUE)
         return fallback
     }
-
 }

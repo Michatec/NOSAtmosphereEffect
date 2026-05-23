@@ -24,6 +24,8 @@ import com.app.nosatmosphereeffect.R
 import com.app.nosatmosphereeffect.helper.PlaylistAdapter
 import com.app.nosatmosphereeffect.service.AtmosphereService
 import com.app.nosatmosphereeffect.service.BlurToSharpService
+import com.app.nosatmosphereeffect.service.ColorFillReverseService
+import com.app.nosatmosphereeffect.service.ColorFillService
 import com.app.nosatmosphereeffect.service.FrostedReverseService
 import com.app.nosatmosphereeffect.service.FrostedService
 import com.app.nosatmosphereeffect.service.HalftoneReverseService
@@ -401,6 +403,8 @@ class PlaylistEditorActivity : AppCompatActivity() {
                 "FROSTED_REVERSE" -> FrostedReverseService::class.java
                 "HALFTONE" -> HalftoneService::class.java
                 "HALFTONE_REVERSE" -> HalftoneReverseService::class.java
+                "COLORFILL" -> ColorFillService::class.java
+                "COLORFILL_REVERSE" -> ColorFillReverseService::class.java
                 else -> AtmosphereService::class.java
             }
             val intent = Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER)

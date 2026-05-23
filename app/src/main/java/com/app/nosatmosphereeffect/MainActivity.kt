@@ -17,6 +17,8 @@ import com.app.nosatmosphereeffect.activity.AdvancedSettingsActivity
 import com.app.nosatmosphereeffect.activity.EffectSelectionActivity
 import com.app.nosatmosphereeffect.service.AtmosphereService
 import com.app.nosatmosphereeffect.service.BlurToSharpService
+import com.app.nosatmosphereeffect.service.ColorFillReverseService
+import com.app.nosatmosphereeffect.service.ColorFillService
 import com.app.nosatmosphereeffect.service.FrostedReverseService
 import com.app.nosatmosphereeffect.service.FrostedService
 import com.app.nosatmosphereeffect.service.HalftoneReverseService
@@ -282,6 +284,8 @@ class MainActivity : AppCompatActivity() {
                 FrostedReverseService::class.java.name -> "FROSTED_REVERSE"
                 HalftoneService::class.java.name -> "HALFTONE"
                 HalftoneReverseService::class.java.name -> "HALFTONE_REVERSE"
+                ColorFillService::class.java.name -> "COLORFILL"
+                ColorFillReverseService::class.java.name -> "COLORFILL_REVERSE"
                 else -> null
             }
         }

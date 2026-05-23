@@ -27,6 +27,7 @@ import com.app.nosatmosphereeffect.MainActivity
 import com.app.nosatmosphereeffect.R
 import com.app.nosatmosphereeffect.helper.TouchImageView
 import com.app.nosatmosphereeffect.service.AtmosphereService
+import com.app.nosatmosphereeffect.service.ColorFillService
 import com.app.nosatmosphereeffect.service.FrostedService
 import com.app.nosatmosphereeffect.service.HalftoneService
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -272,6 +273,8 @@ class CropActivity : AppCompatActivity() {
                 FrostedService::class.java
             } else if (effectId == "HALFTONE"){
                 HalftoneService::class.java
+            } else if (effectId == "COLORFILL"){
+                ColorFillService::class.java
             } else {
                 AtmosphereService::class.java
             }

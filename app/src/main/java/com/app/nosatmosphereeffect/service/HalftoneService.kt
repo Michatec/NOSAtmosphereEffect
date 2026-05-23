@@ -53,6 +53,9 @@ class HalftoneService : GLWallpaperService() {
 
         private val resetRunnable = Runnable {
             prepareForNextUnlock()
+        }
+
+        private val rotationRunnable = Runnable {
             rotateWallpaper()
         }
 
@@ -177,15 +180,18 @@ class HalftoneService : GLWallpaperService() {
                     Intent.ACTION_SCREEN_ON -> {
                         isLocked = true
                         handler.removeCallbacks(unlockChecker)
+                        handler.removeCallbacks(rotationRunnable)
                         handler.post(unlockChecker)
                     }
                     Intent.ACTION_SCREEN_OFF -> {
                         handler.removeCallbacks(unlockChecker)
                         isLocked = true
                         handler.postDelayed(resetRunnable, lockDelay)
+                        handler.postDelayed(rotationRunnable, lockDelay)
                     }
                     Intent.ACTION_USER_PRESENT -> {
                         handler.removeCallbacks(resetRunnable)
+                        handler.removeCallbacks(rotationRunnable)
                         if (isLocked) {
                             isLocked = false
                             playUnlockAnimation()

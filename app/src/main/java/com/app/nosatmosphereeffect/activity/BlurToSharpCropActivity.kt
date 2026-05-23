@@ -22,6 +22,8 @@ import androidx.exifinterface.media.ExifInterface
 import com.app.nosatmosphereeffect.R
 import com.app.nosatmosphereeffect.helper.TouchImageView
 import com.app.nosatmosphereeffect.service.BlurToSharpService
+import com.app.nosatmosphereeffect.service.ColorFillReverseService
+import com.app.nosatmosphereeffect.service.ColorFillService
 import com.app.nosatmosphereeffect.service.FrostedReverseService
 import com.app.nosatmosphereeffect.service.HalftoneReverseService
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -250,6 +252,8 @@ class BlurToSharpCropActivity : AppCompatActivity() {
                 FrostedReverseService::class.java
             } else if (effectId == "HALFTONE_REVERSE"){
                 HalftoneReverseService::class.java
+            } else if (effectId == "COLORFILL_REVERSE"){
+                ColorFillReverseService::class.java
             } else {
                 BlurToSharpService::class.java
             }
