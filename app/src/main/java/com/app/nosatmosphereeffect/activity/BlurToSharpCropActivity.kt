@@ -23,13 +23,13 @@ import com.app.nosatmosphereeffect.R
 import com.app.nosatmosphereeffect.helper.TouchImageView
 import com.app.nosatmosphereeffect.service.BlurToSharpService
 import com.app.nosatmosphereeffect.service.ColorFillReverseService
-import com.app.nosatmosphereeffect.service.ColorFillService
 import com.app.nosatmosphereeffect.service.FrostedReverseService
 import com.app.nosatmosphereeffect.service.HalftoneReverseService
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
+import androidx.core.content.edit
 
 class BlurToSharpCropActivity : AppCompatActivity() {
     private var effectId: String = "REVERSE"
@@ -56,7 +56,7 @@ class BlurToSharpCropActivity : AppCompatActivity() {
         btnSave.setText(R.string.action_apply)
 
         val uri = intent.data ?: run {
-            Toast.makeText(this, "No Image Data Found", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, R.string.error_no_image_data, Toast.LENGTH_SHORT).show()
             finish()
             return
         }
@@ -68,13 +68,13 @@ class BlurToSharpCropActivity : AppCompatActivity() {
                     if (correctedBitmap != null) {
                         cropView.setInitialImage(correctedBitmap)
                     } else {
-                        Toast.makeText(this, "Could not load image format.", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this, R.string.error_invalid_format, Toast.LENGTH_SHORT).show()
                         finish()
                     }
                 }
             } catch (e: Exception) {
                 runOnUiThread {
-                    Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, getString(R.string.error_prefix, e.message), Toast.LENGTH_SHORT).show()
                     finish()
                 }
             }
@@ -108,11 +108,11 @@ class BlurToSharpCropActivity : AppCompatActivity() {
 
         } catch (e: Exception) {
             Handler(Looper.getMainLooper()).post {
-                Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, context.getString(R.string.error_prefix, e.message), Toast.LENGTH_LONG).show()
             }
             return null
         } finally {
-            try { inputStream?.close() } catch (e: Exception) {Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_LONG).show()}
+            try { inputStream?.close() } catch (e: Exception) {Toast.makeText(this, getString(R.string.error_prefix, e.message), Toast.LENGTH_LONG).show()}
         }
     }
 
@@ -150,7 +150,7 @@ class BlurToSharpCropActivity : AppCompatActivity() {
 
         } catch (e: Exception) {
             Handler(Looper.getMainLooper()).post {
-                Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, context.getString(R.string.error_prefix, e.message), Toast.LENGTH_LONG).show()
             }
             return bitmap
         } finally {
@@ -186,30 +186,30 @@ class BlurToSharpCropActivity : AppCompatActivity() {
 
     private fun showApplyDialog(bitmap: Bitmap) {
         MaterialAlertDialogBuilder(this)
-            .setTitle("Apply Wallpaper")
-            .setMessage("In the next screen, please select:\n\nSet Wallpaper > Home Screen and Lock Screen.\n\n(This ensures the lock screen effect works correctly).")
-            .setPositiveButton("Set Wallpaper") { _, _ ->
+            .setTitle(R.string.dialog_apply_title)
+            .setMessage(R.string.dialog_apply_message)
+            .setPositiveButton(R.string.action_set_wallpaper) { _, _ ->
                 applyWallpaper(bitmap)
             }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton(R.string.action_cancel, null)
             .show()
     }
 
     private fun applyWallpaper(bitmap: Bitmap) {
-        Toast.makeText(this, "Applying...", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, R.string.status_applying, Toast.LENGTH_SHORT).show()
 
         Thread {
             try {
 
-                getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
-                    .edit()
-                    .clear()
-                    .apply()
+                getSharedPreferences("app_prefs", MODE_PRIVATE)
+                    .edit {
+                        clear()
+                    }
 
-                getSharedPreferences("wallpaper_prefs", Context.MODE_PRIVATE)
-                    .edit()
-                    .clear()
-                    .apply()
+                getSharedPreferences("wallpaper_prefs", MODE_PRIVATE)
+                    .edit {
+                        clear()
+                    }
 
                 val playlistDir = File(filesDir, "playlist")
                 if (playlistDir.exists()) playlistDir.deleteRecursively()
@@ -220,18 +220,18 @@ class BlurToSharpCropActivity : AppCompatActivity() {
                 saveFixedWallpaper(bitmap)
 
                 runOnUiThread {
-                    Toast.makeText(this, "Setup complete! Now lock and unlock the screen to activate.", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, R.string.status_setup_complete, Toast.LENGTH_LONG).show()
                     val intent = Intent("com.app.nosatmosphereeffect.RELOAD_WALLPAPER")
                     intent.setPackage(packageName)
                     sendBroadcast(intent)
 
-                    Toast.makeText(this, "Setup complete! Now lock and unlock the screen to activate.", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, R.string.status_setup_complete, Toast.LENGTH_LONG).show()
 
                     activateService()
                 }
             } catch (e: Exception) {
                 runOnUiThread {
-                    Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, getString(R.string.error_prefix, e.message), Toast.LENGTH_LONG).show()
                 }
             }
         }.start()
@@ -248,14 +248,19 @@ class BlurToSharpCropActivity : AppCompatActivity() {
 
     private fun activateService() {
         try {
-            val serviceClass = if (effectId == "FROSTED_REVERSE") {
-                FrostedReverseService::class.java
-            } else if (effectId == "HALFTONE_REVERSE"){
-                HalftoneReverseService::class.java
-            } else if (effectId == "COLORFILL_REVERSE"){
-                ColorFillReverseService::class.java
-            } else {
-                BlurToSharpService::class.java
+            val serviceClass = when (effectId) {
+                "FROSTED_REVERSE" -> {
+                    FrostedReverseService::class.java
+                }
+                "HALFTONE_REVERSE" -> {
+                    HalftoneReverseService::class.java
+                }
+                "COLORFILL_REVERSE" -> {
+                    ColorFillReverseService::class.java
+                }
+                else -> {
+                    BlurToSharpService::class.java
+                }
             }
 
             val intent = Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER)
@@ -264,7 +269,7 @@ class BlurToSharpCropActivity : AppCompatActivity() {
                 ComponentName(this, serviceClass)
             )
             startActivity(intent)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             val intent = Intent(WallpaperManager.ACTION_LIVE_WALLPAPER_CHOOSER)
             startActivity(intent)
         } finally {

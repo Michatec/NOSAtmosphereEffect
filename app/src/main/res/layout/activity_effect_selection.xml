@@ -17,7 +17,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Choose Effect"
+            android:text="@string/title_choose_effect"
             android:textAppearance="?attr/textAppearanceDisplaySmall"
             android:textColor="@color/white"
             android:layout_marginBottom="32dp"

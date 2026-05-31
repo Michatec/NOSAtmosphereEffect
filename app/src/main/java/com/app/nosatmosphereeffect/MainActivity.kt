@@ -1,17 +1,14 @@
 package com.app.nosatmosphereeffect
 
 import android.app.WallpaperManager
-import android.content.Context
 import android.content.Intent
-import android.os.Bundle
 import android.os.Build
+import android.os.Bundle
 import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import com.google.android.material.slider.Slider
-import com.google.android.material.materialswitch.MaterialSwitch
 import androidx.core.content.edit
 import com.app.nosatmosphereeffect.activity.AdvancedSettingsActivity
 import com.app.nosatmosphereeffect.activity.EffectSelectionActivity
@@ -23,7 +20,10 @@ import com.app.nosatmosphereeffect.service.FrostedReverseService
 import com.app.nosatmosphereeffect.service.FrostedService
 import com.app.nosatmosphereeffect.service.HalftoneReverseService
 import com.app.nosatmosphereeffect.service.HalftoneService
+import com.google.android.material.materialswitch.MaterialSwitch
+import com.google.android.material.slider.Slider
 import java.io.File
+import androidx.core.net.toUri
 
 class MainActivity : AppCompatActivity() {
 
@@ -158,7 +158,7 @@ class MainActivity : AppCompatActivity() {
     private fun checkWallpaperStatus() {
         val activeEffect = getActiveEffectType()
         if (activeEffect != null) {
-            statusText.text = "Wallpaper is active! Customize your experience below."
+            statusText.text = getString(R.string.status_wallpaper_active)
             btnSetupWallpaper.visibility = View.GONE
             layoutUpdateWallpaper.visibility = View.VISIBLE
             layoutSettings.visibility = View.VISIBLE
@@ -192,21 +192,21 @@ class MainActivity : AppCompatActivity() {
                 // Mode has changed! Force safe defaults.
                 if (isPlaylistModeActive) {
                     // Moving to Playlist -> Force OFF (Performance)
-                    prefs.edit().putBoolean("notify_system_colors", false).apply()
+                    prefs.edit { putBoolean("notify_system_colors", false) }
                     // Optional: Broadcast this change immediately so Service knows
                     sendConfigUpdate()
                 } else {
                     // Moving to Single -> Force ON (Safe)
-                    prefs.edit().putBoolean("notify_system_colors", true).apply()
+                    prefs.edit { putBoolean("notify_system_colors", true) }
                     sendConfigUpdate()
                 }
                 // Save new mode
-                prefs.edit().putString("last_known_wallpaper_mode", currentMode).apply()
+                prefs.edit { putString("last_known_wallpaper_mode", currentMode) }
             }
 
             // 4. Sync Switch UI
             switchColors.setOnCheckedChangeListener(null)
-            // Now safe to read because we auto-corrected above if needed
+            // Now safe to read because we autocorrected above if needed
             val shouldNotify = prefs.getBoolean("notify_system_colors", !isPlaylistModeActive)
             switchColors.isChecked = shouldNotify
 
@@ -270,7 +270,7 @@ class MainActivity : AppCompatActivity() {
 
         btnUpdateDimness.isEnabled = false
 
-        Toast.makeText(this, "Wallpaper Updated!", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, getString(R.string.toast_wallpaper_updated), Toast.LENGTH_SHORT).show()
     }
     private fun getActiveEffectType(): String? {
         val wm = WallpaperManager.getInstance(this)
@@ -313,18 +313,25 @@ class MainActivity : AppCompatActivity() {
         sendBroadcast(intent)
 
         btnUpdateBlur.isEnabled = false
-        Toast.makeText(this, "Blur Strength Updated!", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, getString(R.string.toast_blur_updated), Toast.LENGTH_SHORT).show()
     }
     private fun showImageSelectionDialog() {
         // Dynamically change options based on whether a playlist already exists
         val options = if (isPlaylistModeActive) {
-            arrayOf("Single Image", "Create New Playlist", "Edit Existing Playlist")
+            arrayOf(
+                getString(R.string.mode_single_image),
+                getString(R.string.mode_create_playlist),
+                getString(R.string.mode_edit_playlist)
+            )
         } else {
-            arrayOf("Single Image", "Multiple Images (Playlist)")
+            arrayOf(
+                getString(R.string.mode_single_image),
+                getString(R.string.mode_multiple_images)
+            )
         }
 
         com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
-            .setTitle("Select Wallpaper Mode")
+            .setTitle(R.string.dialog_select_mode_title)
             .setItems(options) { _, which ->
                 if (isPlaylistModeActive) {
                     when (which) {
@@ -356,7 +363,7 @@ class MainActivity : AppCompatActivity() {
         // Convert to standard file URIs that PlaylistEditorActivity can read
         val uris = ArrayList<android.net.Uri>()
         files.forEach { file ->
-            uris.add(android.net.Uri.parse("file://${file.absolutePath}"))
+            uris.add("file://${file.absolutePath}".toUri())
         }
 
         val effectId = getActiveEffectType() ?: "ORIGINAL"

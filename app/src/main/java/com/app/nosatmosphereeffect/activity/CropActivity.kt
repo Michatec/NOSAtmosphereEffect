@@ -2,8 +2,6 @@ package com.app.nosatmosphereeffect.activity
 
 import android.app.WallpaperManager
 import android.content.ComponentName
-import android.content.ContentUris
-import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
@@ -11,10 +9,8 @@ import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.net.Uri
 import android.os.Bundle
-import android.os.Environment
 import android.os.Handler
 import android.os.Looper
-import android.provider.MediaStore
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.Toast
@@ -23,7 +19,6 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.exifinterface.media.ExifInterface
-import com.app.nosatmosphereeffect.MainActivity
 import com.app.nosatmosphereeffect.R
 import com.app.nosatmosphereeffect.helper.TouchImageView
 import com.app.nosatmosphereeffect.service.AtmosphereService
@@ -34,6 +29,7 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
+import androidx.core.content.edit
 
 class CropActivity : AppCompatActivity() {
     private var effectId: String = "ORIGINAL" // Default
@@ -60,7 +56,7 @@ class CropActivity : AppCompatActivity() {
         btnSave.setText(R.string.action_apply)
 
         val uri = intent.data ?: run {
-            Toast.makeText(this, "No Image Data Found", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, R.string.error_no_image_data, Toast.LENGTH_SHORT).show()
             finish()
             return
         }
@@ -75,13 +71,13 @@ class CropActivity : AppCompatActivity() {
                     if (correctedBitmap != null) {
                         cropView.setInitialImage(correctedBitmap)
                     } else {
-                        Toast.makeText(this, "Could not load image format.", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this, R.string.error_invalid_format, Toast.LENGTH_SHORT).show()
                         finish()
                     }
                 }
             } catch (e: Exception) {
                 runOnUiThread {
-                    Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, getString(R.string.error_prefix, e.message), Toast.LENGTH_SHORT).show()
                     finish()
                 }
             }
@@ -126,11 +122,11 @@ class CropActivity : AppCompatActivity() {
 
         } catch (e: Exception) {
             Handler(Looper.getMainLooper()).post {
-                Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, context.getString(R.string.error_prefix, e.message), Toast.LENGTH_LONG).show()
             }
             return null
         } finally {
-            try { inputStream?.close() } catch (e: Exception) {Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_LONG).show()}
+            try { inputStream?.close() } catch (e: Exception) {Toast.makeText(this, getString(R.string.error_prefix, e.message), Toast.LENGTH_LONG).show()}
         }
     }
 
@@ -171,7 +167,7 @@ class CropActivity : AppCompatActivity() {
 
         } catch (e: Exception) {
             Handler(Looper.getMainLooper()).post {
-                Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, context.getString(R.string.error_prefix, e.message), Toast.LENGTH_LONG).show()
             }
             return bitmap
         } finally {
@@ -207,30 +203,30 @@ class CropActivity : AppCompatActivity() {
 
     private fun showApplyDialog(bitmap: Bitmap) {
         MaterialAlertDialogBuilder(this)
-            .setTitle("Apply Wallpaper")
-            .setMessage("In the next screen, please select:\n\nSet Wallpaper > Home Screen and Lock Screen.\n\n(This ensures the lock screen effect works correctly).")
-            .setPositiveButton("Set Wallpaper") { _, _ ->
+            .setTitle(R.string.dialog_apply_title)
+            .setMessage(R.string.dialog_apply_message)
+            .setPositiveButton(R.string.action_set_wallpaper) { _, _ ->
                 applyWallpaper(bitmap)
             }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton(R.string.action_cancel, null)
             .show()
     }
 
     private fun applyWallpaper(bitmap: Bitmap) {
-        Toast.makeText(this, "Applying...", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, R.string.status_applying, Toast.LENGTH_SHORT).show()
 
         Thread {
             try {
 
-                getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
-                    .edit()
-                    .clear()
-                    .apply()
+                getSharedPreferences("app_prefs", MODE_PRIVATE)
+                    .edit {
+                        clear()
+                    }
 
-                getSharedPreferences("wallpaper_prefs", Context.MODE_PRIVATE)
-                    .edit()
-                    .clear()
-                    .apply()
+                getSharedPreferences("wallpaper_prefs", MODE_PRIVATE)
+                    .edit {
+                        clear()
+                    }
 
                 val playlistDir = File(filesDir, "playlist")
                 if (playlistDir.exists()) playlistDir.deleteRecursively()
@@ -241,19 +237,19 @@ class CropActivity : AppCompatActivity() {
                 saveFixedWallpaper(bitmap)
 
                 runOnUiThread {
-                    Toast.makeText(this, "Setup complete! Now lock and unlock the screen to activate.", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, R.string.status_setup_complete, Toast.LENGTH_LONG).show()
                     val intent = Intent("com.app.nosatmosphereeffect.RELOAD_WALLPAPER")
                     intent.setPackage(packageName)
                     sendBroadcast(intent)
 
-                    Toast.makeText(this, "Setup complete! Now lock and unlock the screen to activate.", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, R.string.status_setup_complete, Toast.LENGTH_LONG).show()
 
                     activateService()
                 }
 
             } catch (e: Exception) {
                 runOnUiThread {
-                    Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, getString(R.string.error_prefix, e.message), Toast.LENGTH_LONG).show()
                 }
             }
         }.start()
@@ -269,14 +265,19 @@ class CropActivity : AppCompatActivity() {
     }
     private fun activateService() {
         try {
-            val serviceClass = if (effectId == "FROSTED") {
-                FrostedService::class.java
-            } else if (effectId == "HALFTONE"){
-                HalftoneService::class.java
-            } else if (effectId == "COLORFILL"){
-                ColorFillService::class.java
-            } else {
-                AtmosphereService::class.java
+            val serviceClass = when (effectId) {
+                "FROSTED" -> {
+                    FrostedService::class.java
+                }
+                "HALFTONE" -> {
+                    HalftoneService::class.java
+                }
+                "COLORFILL" -> {
+                    ColorFillService::class.java
+                }
+                else -> {
+                    AtmosphereService::class.java
+                }
             }
 
             val intent = Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER)
@@ -285,7 +286,7 @@ class CropActivity : AppCompatActivity() {
                 ComponentName(this, serviceClass)
             )
             startActivity(intent)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             val intent = Intent(WallpaperManager.ACTION_LIVE_WALLPAPER_CHOOSER)
             startActivity(intent)
         } finally {

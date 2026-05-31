@@ -45,7 +45,7 @@ class MultiImageCropActivity : AppCompatActivity() {
         if (sourceUri != null) {
             loadImage(sourceUri!!, savedMatrix)
         } else {
-            Toast.makeText(this, "No Image Data Found", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, R.string.error_no_image_data, Toast.LENGTH_SHORT).show()
             finish()
         }
 
@@ -72,7 +72,7 @@ class MultiImageCropActivity : AppCompatActivity() {
 
         } catch (e: Exception) {
             e.printStackTrace()
-            Toast.makeText(this, "Failed to load image", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, R.string.error_failed_load_image, Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -95,7 +95,7 @@ class MultiImageCropActivity : AppCompatActivity() {
             finish()
         } catch (e: Exception) {
             e.printStackTrace()
-            Toast.makeText(this, "Failed to save image", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, R.string.error_failed_save_image, Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -115,7 +115,7 @@ class MultiImageCropActivity : AppCompatActivity() {
             if (rotation == 0f) return bitmap
             val matrix = Matrix().apply { postRotate(rotation) }
             return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             return bitmap
         }
     }

@@ -8,8 +8,8 @@ android {
 
     defaultConfig {
         applicationId = "com.saad_khan_rind.atmosphere_effect"
-        versionName = "5.8.2"
-        versionCode = 200582
+        versionName = "5.8.3"
+        versionCode = 200583
     }
 
     flavorDimensions += "apiLevel"
@@ -19,15 +19,15 @@ android {
         create("v36") {
             dimension = "apiLevel"
             minSdk = 36
-            targetSdk = 36
-            versionCode = 200582
+            targetSdk = 37
+            versionCode = 200583
         }
 
         create("v33") {
             dimension = "apiLevel"
             minSdk = 33
-            targetSdk = 33
-            versionCode = 100582
+            targetSdk = 37
+            versionCode = 100583
         }
 
     }
@@ -63,18 +63,8 @@ kotlin {
 
 dependencies {
     implementation(libs.androidx.exifinterface)
-
-    // --- Dependencies for v36 (API 36) ---
-    // These only apply when building the v36 flavor
-    "v36Implementation"("androidx.core:core-ktx:1.17.0")
-    "v36Implementation"("androidx.lifecycle:lifecycle-service:2.10.0")
-    "v36Implementation"("androidx.appcompat:appcompat:1.7.1")
-    "v36Implementation"("com.google.android.material:material:1.13.0")
-
-    // --- Dependencies for v33 (API 33) ---
-    // These only apply when building the v33 flavor
-    "v33Implementation"("androidx.core:core-ktx:1.12.0")
-    "v33Implementation"("androidx.lifecycle:lifecycle-service:2.6.2")
-    "v33Implementation"("androidx.appcompat:appcompat:1.6.1")
-    "v33Implementation"("com.google.android.material:material:1.11.0")
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.lifecycle.service)
+    implementation(libs.androidx.appcompat)
+    implementation(libs.material)
 }

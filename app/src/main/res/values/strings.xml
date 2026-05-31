@@ -11,5 +11,116 @@
     <string name="dimness_level">Dimness Level</string>
     <string name="update_wallpaper_dimness">Update Wallpaper Dimness</string>
     <string name="fine_tune">Fine Tune</string>
+    <string name="fine_tuning">Fine Tuning</string>
+    <string name="unlock_check_interval_ms">Unlock Check Interval (ms)</string>
+    <string name="lock_delay_ms">Lock Delay (ms)</string>
+    <string name="animation_duration_ms">Animation Duration (ms)</string>
+    <string name="animation_duration_helper_text">Recommended for\nOriginal: 2500ms | Reverse: 1500ms | Others: 500ms</string>
+    <string name="unlock_helper_text">Recommended for\nOthers: 50ms | Samsung: 30000ms</string>
+    <string name="lock_helper_text">Recommended for\nOthers: 800ms | Samsung: 0ms</string>
+    <string name="more_info">More Info</string>
+
+    <string name="playlist_rotation_mode">Playlist Rotation Mode</string>
+    <string name="playlist_rotation_helper">Intervals, or sync Image 1(Light)/Image 2(Dark)</string>
+    <string name="halftone_pixel_size">Halftone Pixel Size</string>
+    <string name="bw_effect">Black &amp; White Effect</string>
+    <string name="fingerprint_horizontal">Fingerprint Position (Horizontal)</string>
+    <string name="fingerprint_vertical">Fingerprint Position (Vertical)</string>
+    <string name="enable_noise">Enable Blur Noise (Film Grain)</string>
+    <string name="noise_scale">Noise Scale (Grain Size)</string>
+    <string name="noise_scale_helper">Lower = Larger Grains. Recommended: 2000</string>
+    <string name="noise_strength">Noise Strength (Intensity)</string>
+    <string name="noise_strength_helper">0.0 to 1.0. Recommended: 0.06</string>
+    <string name="blob_saturation">Blob Saturation</string>
+    <string name="blob_contrast">Blob Contrast</string>
+    <string name="save_apply">Save &amp; Apply</string>
+    <string name="reset_recommended">Reset to Recommended</string>
+
+    <!-- MainActivity & activity_main.xml -->
+    <string name="status_wallpaper_active">Wallpaper is active! Customize your experience below.</string>
+    <string name="action_select_effect_wallpaper">Select Effect &amp; Wallpaper</string>
+    <string name="action_change_image">Change Image</string>
+    <string name="blur_strength">Blur Strength</string>
+    <string name="action_update_blur_strength">Update Blur Strength</string>
+    <string name="sync_system_colors">Sync System Colors</string>
+    <string name="sync_system_colors_helper">Updates Material You colors on wallpaper change. Disable if buggy/laggy (in playlist mode especially).</string>
+    <string name="toast_wallpaper_updated">Wallpaper Updated!</string>
+    <string name="toast_blur_updated">Blur Strength Updated!</string>
+    <string name="mode_single_image">Single Image</string>
+    <string name="mode_create_playlist">Create New Playlist</string>
+    <string name="mode_edit_playlist">Edit Existing Playlist</string>
+    <string name="mode_multiple_images">Multiple Images (Playlist)</string>
+    <string name="dialog_select_mode_title">Select Wallpaper Mode</string>
+
+    <!-- CropActivity.kt -->
+    <string name="error_no_image_data">No Image Data Found</string>
+    <string name="error_invalid_format">Could not load image format.</string>
+    <string name="error_prefix">Error: %1$s</string>
+    <string name="dialog_apply_title">Apply Wallpaper</string>
+    <string name="dialog_apply_message">In the next screen, please select:\n\nSet Wallpaper > Home Screen and Lock Screen.\n\n(This ensures the lock screen effect works correctly).</string>
+    <string name="action_set_wallpaper">Set Wallpaper</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="status_applying">Applying…</string>
+    <string name="status_setup_complete">Setup complete! Now lock and unlock the screen to activate.</string>
+
+    <!-- Effects -->
+    <string name="effect_original_title">Original Atmosphere</string>
+    <string name="effect_original_desc">Wake up: Sharp ➔ Blur\nSignature style. Drifting ambient atmospheric clouds.</string>
+    <string name="effect_reverse_title">Reverse Atmosphere</string>
+    <string name="effect_reverse_desc">Wake up: Blur ➔ Sharp\nMysterious reveal. Ambient clouds fade to a clear view.</string>
+    <string name="effect_frosted_title">Simple Frosted</string>
+    <string name="effect_frosted_desc">Wake up: Sharp ➔ Blur\nModern minimalism. A clean, uniform frosted glass layer.</string>
+    <string name="effect_frosted_reverse_title">Simple Frosted (Reverse)</string>
+    <string name="effect_frosted_reverse_desc">Wake up: Blur ➔ Sharp\nElegant clarity. Heavy frost dissolves to crystal clear.</string>
+    <string name="effect_halftone_title">Halftone Print</string>
+    <string name="effect_halftone_desc">Wake up: Sharp ➔ Halftone\nRetro aesthetic. Sharp view dissolves into comic-book CMYK dots.</string>
+    <string name="effect_halftone_reverse_title">Halftone Print (Reverse)</string>
+    <string name="effect_halftone_reverse_desc">Wake up: Halftone ➔ Sharp\nRetro aesthetic. CMYK dots seamlessly expand into continuous color.</string>
+    <string name="effect_colorfill_title">Color Fill</string>
+    <string name="effect_colorfill_desc">Wake up: B&amp;W ➔ Color\nLiquid awakening. Colors flow outward from your fingerprint.</string>
+    <string name="effect_colorfill_reverse_title">Color Fill (Reverse)</string>
+    <string name="effect_colorfill_reverse_desc">Wake up: Color ➔ B&amp;W\nFluid drain. Colors wash away into grayscale.</string>
+
+    <!-- AdvancedSettingsActivity -->
+    <string name="rotation_system_theme">System Theme (Light/Dark)</string>
+    <string name="rotation_every_lock">Every Lock (Instant)</string>
+    <string name="rotation_1_minute">1 Minute</string>
+    <string name="rotation_15_minutes">15 Minutes</string>
+    <string name="rotation_30_minutes">30 Minutes</string>
+    <string name="rotation_1_hour">1 Hour</string>
+    <string name="rotation_3_hours">3 Hours</string>
+    <string name="rotation_6_hours">6 Hours</string>
+    <string name="rotation_12_hours">12 Hours</string>
+    <string name="rotation_24_hours">24 Hours</string>
+
+    <string name="dialog_unlock_interval_title">Unlock Check Interval</string>
+    <string name="dialog_unlock_interval_message">Controls how frequently the app checks if the device has been unlocked.\n\n• What it solves:\nIf you unlock your phone and the animation starts after a delay, lower this value.\n\n• Recommended:\n30000ms for Samsung and most devices (Saves Battery).\n50ms if you experience delayed animation start.</string>
+    <string name="dialog_lock_delay_title">Lock Delay</string>
+    <string name="dialog_lock_delay_message">Adds a pause before the wallpaper resets when you lock the phone.\n\n• What it solves:\nIf you see a glimpse of the wallpaper resetting/snapping back before the screen turns fully black, increase this value.\n\n• Recommended:\n0ms for Samsung/Most devices.\n500ms - 800ms if you experience the glitch.\n\n⚠️ Note: If this value is too high, unlocking immediately after locking might show the wallpaper in its previous state.</string>
+    <string name="action_got_it">Got it</string>
+    <string name="toast_settings_applied">Settings Applied!</string>
+
+    <!-- PlaylistEditorActivity -->
+    <string name="toast_images_added">%1$d images added</string>
+    <string name="playlist_images_selected">%1$d Images Selected</string>
+    <string name="status_processing_playlist">Processing playlist…</string>
+    <string name="error_playlist_empty">Playlist is empty</string>
+
+    <!-- Generic / MultiImageCropActivity -->
+    <string name="error_failed_load_image">Failed to load image</string>
+    <string name="error_failed_save_image">Failed to save image</string>
+
+    <!-- Default Values -->
+    <string name="default_noise_scale" translatable="false">2000.0</string>
+    <string name="default_noise_strength" translatable="false">0.06</string>
+
+    <!-- Additional UI -->
+    <string name="title_review_playlist">Review Playlist</string>
+    <string name="action_add_more_images">Add More Images</string>
+    <string name="action_apply_playlist">Apply Playlist</string>
+    <string name="action_done">Done</string>
+    <string name="title_choose_effect">Choose Effect</string>
+    <string name="null_images">0 Images</string>
+    <string name="contentdes_image" translatable="false">---</string>
 
 </resources>

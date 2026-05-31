@@ -1,6 +1,5 @@
 package com.app.nosatmosphereeffect.activity
 
-import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.view.View
@@ -78,16 +77,27 @@ class AdvancedSettingsActivity : AppCompatActivity() {
         val defaultDuration = if (activeEffect == "REVERSE" || activeEffect.contains("COLORFILL")) 1500L else if (activeEffect == "ORIGINAL") 2500L else 500L
         val defaultPoll = if (isSamsung) 30000L else 50L
         val defaultDelay = if (isSamsung) 0L else 800L
-        val layoutRotationContainer = findViewById<com.google.android.material.textfield.TextInputLayout>(R.id.layoutRotationContainer)
+        val layoutRotationContainer = findViewById<TextInputLayout>(R.id.layoutRotationContainer)
         val isPlaylistMode = intent.getBooleanExtra("IS_PLAYLIST_MODE", false)
 
         // Hide if not a playlist
         layoutRotationContainer.visibility = if (isPlaylistMode) View.VISIBLE else View.GONE
         val dropdownRotation = findViewById<android.widget.AutoCompleteTextView>(R.id.dropdownRotation)
-        val rotationOptions = arrayOf("System Theme (Light/Dark)", "Every Lock (Instant)", "1 Minute", "15 Minutes", "30 Minutes", "1 Hour", "3 Hours", "6 Hours", "12 Hours", "24 Hours")
+        val rotationOptions = arrayOf(
+            getString(R.string.rotation_system_theme),
+            getString(R.string.rotation_every_lock),
+            getString(R.string.rotation_1_minute),
+            getString(R.string.rotation_15_minutes),
+            getString(R.string.rotation_30_minutes),
+            getString(R.string.rotation_1_hour),
+            getString(R.string.rotation_3_hours),
+            getString(R.string.rotation_6_hours),
+            getString(R.string.rotation_12_hours),
+            getString(R.string.rotation_24_hours)
+        )
         val rotationValues = longArrayOf(-1, 0, 1, 15, 30, 60, 180, 360, 720, 1440)
 
-        val wpPrefs = getSharedPreferences("wallpaper_prefs", Context.MODE_PRIVATE)
+        val wpPrefs = getSharedPreferences("wallpaper_prefs", MODE_PRIVATE)
         val savedRotation = wpPrefs.getLong("rotation_interval_minutes", 0)
 
         val adapter = android.widget.ArrayAdapter(this, R.layout.item_dropdown, rotationOptions)
@@ -131,8 +141,8 @@ class AdvancedSettingsActivity : AppCompatActivity() {
         val savedNoiseScale = prefs.getFloat("noise_scale", -1f)
         val savedNoiseStrength = prefs.getFloat("noise_strength", -1f)
 
-        inputNoiseScale.setText(if (savedNoiseScale != -1f) savedNoiseScale.toString() else "2000.0")
-        inputNoiseStrength.setText(if (savedNoiseStrength != -1f) savedNoiseStrength.toString() else "0.06")
+        inputNoiseScale.setText(if (savedNoiseScale != -1f) savedNoiseScale.toString() else getString(R.string.default_noise_scale))
+        inputNoiseStrength.setText(if (savedNoiseStrength != -1f) savedNoiseStrength.toString() else getString(R.string.default_noise_strength))
 
         val isNoiseEnabled = prefs.getBoolean("enable_noise", false)
         switchNoise.isChecked = isNoiseEnabled
@@ -146,32 +156,17 @@ class AdvancedSettingsActivity : AppCompatActivity() {
 
         layoutPoll.setEndIconOnClickListener {
             MaterialAlertDialogBuilder(this)
-                .setTitle("Unlock Check Interval")
-                .setMessage(
-                    "Controls how frequently the app checks if the device has been unlocked.\n\n" +
-                            "• What it solves:\n" +
-                            "If you unlock your phone and the animation starts after a delay, lower this value.\n\n" +
-                            "• Recommended:\n" +
-                            "30000ms for Samsung and most devices (Saves Battery).\n" +
-                            "50ms if you experience delayed animation start."
-                )
-                .setPositiveButton("Got it", null)
+                .setTitle(R.string.dialog_unlock_interval_title)
+                .setMessage(R.string.dialog_unlock_interval_message)
+                .setPositiveButton(R.string.action_got_it, null)
                 .show()
         }
 
         layoutDelay.setEndIconOnClickListener {
             MaterialAlertDialogBuilder(this)
-                .setTitle("Lock Delay")
-                .setMessage(
-                    "Adds a pause before the wallpaper resets when you lock the phone.\n\n" +
-                            "• What it solves:\n" +
-                            "If you see a glimpse of the wallpaper resetting/snapping back before the screen turns fully black, increase this value.\n\n" +
-                            "• Recommended:\n" +
-                            "0ms for Samsung/Most devices.\n" +
-                            "500ms - 800ms if you experience the glitch.\n\n" +
-                            "⚠️ Note: If this value is too high, unlocking immediately after locking might show the wallpaper in its previous state."
-                )
-                .setPositiveButton("Got it", null)
+                .setTitle(R.string.dialog_lock_delay_title)
+                .setMessage(R.string.dialog_lock_delay_message)
+                .setPositiveButton(R.string.action_got_it, null)
                 .show()
         }
 
@@ -188,7 +183,7 @@ class AdvancedSettingsActivity : AppCompatActivity() {
             val originX = sliderOriginX.value
             val originY = sliderOriginY.value
 
-            wpPrefs.edit().putLong("rotation_interval_minutes", selectedRotationValue).apply()
+            wpPrefs.edit { putLong("rotation_interval_minutes", selectedRotationValue) }
 
             prefs.edit {
                 putLong("poll_interval", poll)
@@ -230,8 +225,8 @@ class AdvancedSettingsActivity : AppCompatActivity() {
             inputDuration.setText(defaultDuration.toString())
             switchNoise.isChecked = false
             layoutNoise.visibility = View.GONE
-            inputNoiseScale.setText("2000.0")
-            inputNoiseStrength.setText("0.06")
+            inputNoiseScale.setText(getString(R.string.default_noise_scale))
+            inputNoiseStrength.setText(getString(R.string.default_noise_strength))
             sliderDotSize.value = 12.0f
             switchGrayscale.isChecked = false
             sliderSat.value = 1.0f
@@ -247,7 +242,7 @@ class AdvancedSettingsActivity : AppCompatActivity() {
         val intent = Intent("com.app.nosatmosphereeffect.UPDATE_CONFIG")
         intent.setPackage(packageName)
         sendBroadcast(intent)
-        Toast.makeText(this, "Settings Applied!", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, getString(R.string.toast_settings_applied), Toast.LENGTH_SHORT).show()
         finish()
     }
 }

@@ -16,46 +16,46 @@ class EffectSelectionActivity : AppCompatActivity() {
 
     private var selectedEffectId: String = "ORIGINAL"
 
-    private val effectsList = listOf(
+    private fun getEffectsList() = listOf(
         EffectItem(
             id = "ORIGINAL",
-            title = "Original Atmosphere",
-            description = "Wake up: Sharp ➔ Blur\nSignature style. Drifting ambient atmospheric clouds."
+            title = getString(R.string.effect_original_title),
+            description = getString(R.string.effect_original_desc)
         ),
         EffectItem(
             id = "REVERSE",
-            title = "Reverse Atmosphere",
-            description = "Wake up: Blur ➔ Sharp\nMysterious reveal. Ambient clouds fade to a clear view."
+            title = getString(R.string.effect_reverse_title),
+            description = getString(R.string.effect_reverse_desc)
         ),
         EffectItem(
             id = "FROSTED",
-            title = "Simple Frosted",
-            description = "Wake up: Sharp ➔ Blur\nModern minimalism. A clean, uniform frosted glass layer."
+            title = getString(R.string.effect_frosted_title),
+            description = getString(R.string.effect_frosted_desc)
         ),
         EffectItem(
             id = "FROSTED_REVERSE",
-            title = "Simple Frosted (Reverse)",
-            description = "Wake up: Blur ➔ Sharp\nElegant clarity. Heavy frost dissolves to crystal clear."
+            title = getString(R.string.effect_frosted_reverse_title),
+            description = getString(R.string.effect_frosted_reverse_desc)
         ),
         EffectItem(
             id = "HALFTONE",
-            title = "Halftone Print",
-            description = "Wake up: Sharp ➔ Halftone\nRetro aesthetic. Sharp view dissolves into comic-book CMYK dots."
+            title = getString(R.string.effect_halftone_title),
+            description = getString(R.string.effect_halftone_desc)
         ),
         EffectItem(
             id = "HALFTONE_REVERSE",
-            title = "Halftone Print (Reverse)",
-            description = "Wake up: Halftone ➔ Sharp\nRetro aesthetic. CMYK dots seamlessly expand into continuous color."
+            title = getString(R.string.effect_halftone_reverse_title),
+            description = getString(R.string.effect_halftone_reverse_desc)
         ),
         EffectItem(
             id = "COLORFILL",
-            title = "Color Fill",
-            description = "Wake up: B&W ➔ Color\nLiquid awakening. Colors flow outward from your fingerprint."
+            title = getString(R.string.effect_colorfill_title),
+            description = getString(R.string.effect_colorfill_desc)
         ),
         EffectItem(
             id = "COLORFILL_REVERSE",
-            title = "Color Fill (Reverse)",
-            description = "Wake up: Color ➔ B&W\nFluid drain. Colors wash away into grayscale."
+            title = getString(R.string.effect_colorfill_reverse_title),
+            description = getString(R.string.effect_colorfill_reverse_desc)
         )
     )
 
@@ -77,7 +77,7 @@ class EffectSelectionActivity : AppCompatActivity() {
         val recyclerView = findViewById<RecyclerView>(R.id.recyclerEffects)
         val isUpdateOnly = intent.getBooleanExtra("UPDATE_EFFECT_ONLY", false)
 
-        val adapter = EffectsAdapter(effectsList) { item ->
+        val adapter = EffectsAdapter(getEffectsList()) { item ->
             selectedEffectId = item.id
             if (isUpdateOnly) {
                 applyEffectDirectly(selectedEffectId)
@@ -89,9 +89,12 @@ class EffectSelectionActivity : AppCompatActivity() {
     }
 
     private fun showSelectionDialog() {
-        val options = arrayOf("Single Image", "Multiple Images (Playlist)")
+        val options = arrayOf(
+            getString(R.string.mode_single_image),
+            getString(R.string.mode_multiple_images)
+        )
         MaterialAlertDialogBuilder(this)
-            .setTitle("Select Wallpaper Mode")
+            .setTitle(R.string.dialog_select_mode_title)
             .setItems(options) { _, which ->
                 if (which == 0) {
                     pickSingleImage.launch("image/*")
