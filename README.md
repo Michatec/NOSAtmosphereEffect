@@ -124,6 +124,8 @@ git clone https://github.com/yourusername/NOSAtmosphereEffect.git
 
 This project is open-source and available under the [MIT License](LICENSE).
 
+Copyright (c) 2026 Michatec All rights reserved.
+
 ## Privacy Policy
 
 The privacy policy is [this](https://saad-khan-rind.github.io/NOSAtmosphereEffect/privacy-policy).
