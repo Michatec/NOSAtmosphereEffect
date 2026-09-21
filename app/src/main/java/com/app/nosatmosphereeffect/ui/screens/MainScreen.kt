@@ -40,6 +40,8 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Collections
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.rounded.Bookmarks
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Info
@@ -119,6 +121,8 @@ fun MainScreen(
     onPickMultipleImages: () -> Unit,
     onPickThemePlaylists: () -> Unit,
     onEditExistingPlaylist: () -> Unit,
+    onOpenSavedPlaylists: (() -> Unit)? = null,
+    onPickFolderPlaylist: (() -> Unit)? = null,
     onAdvancedSettings: () -> Unit,
     onTitleTap: () -> Unit,
     rendererStatus: RendererStatusUiModel? = null
@@ -269,7 +273,13 @@ fun MainScreen(
             onPickSingle = { showImageSheet = false; onPickSingleImage() },
             onPickMultiple = { showImageSheet = false; onPickMultipleImages() },
             onPickThemePlaylists = { showImageSheet = false; onPickThemePlaylists() },
-            onEditExisting = { showImageSheet = false; onEditExistingPlaylist() }
+            onEditExisting = { showImageSheet = false; onEditExistingPlaylist() },
+            onOpenSaved = onOpenSavedPlaylists?.let { open ->
+                { showImageSheet = false; open() }
+            },
+            onPickFolder = onPickFolderPlaylist?.let { pick ->
+                { showImageSheet = false; pick() }
+            }
         )
     }
 
@@ -856,7 +866,9 @@ fun WallpaperModeSheet(
     onPickSingle: () -> Unit,
     onPickMultiple: () -> Unit,
     onPickThemePlaylists: () -> Unit,
-    onEditExisting: (() -> Unit)? = null
+    onEditExisting: (() -> Unit)? = null,
+    onOpenSaved: (() -> Unit)? = null,
+    onPickFolder: (() -> Unit)? = null
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -886,6 +898,14 @@ fun WallpaperModeSheet(
                 icon = Icons.Rounded.Collections,
                 onClick = onPickMultiple
             )
+            if (onPickFolder != null) {
+                ModeOption(
+                    title = "Playlist from folder",
+                    subtitle = "Follow folders and add new images automatically",
+                    icon = Icons.Rounded.Folder,
+                    onClick = onPickFolder
+                )
+            }
             ModeOption(
                 title = if (isThemePlaylistMode) "New theme playlists" else "Theme playlists",
                 subtitle = "Separate wallpapers for light and dark themes",
@@ -902,6 +922,14 @@ fun WallpaperModeSheet(
                     subtitle = "Change its images and crops",
                     icon = Icons.Rounded.Edit,
                     onClick = onEditExisting
+                )
+            }
+            if (onOpenSaved != null) {
+                ModeOption(
+                    title = "Saved playlists",
+                    subtitle = "Switch back to a playlist you used before",
+                    icon = Icons.Rounded.Bookmarks,
+                    onClick = onOpenSaved
                 )
             }
         }

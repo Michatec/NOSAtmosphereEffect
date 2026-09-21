@@ -11,6 +11,7 @@ import androidx.lifecycle.ViewModel
 import com.app.nosatmosphereeffect.helper.MatrixStatePolicy
 import com.app.nosatmosphereeffect.helper.WallpaperFitHelper
 import com.app.nosatmosphereeffect.storage.FileTransactions
+import com.app.nosatmosphereeffect.storage.WatchedFolder
 import java.io.File
 
 internal data class PlaylistDraftItem(
@@ -25,6 +26,12 @@ internal data class PlaylistDraftItem(
 internal class StandardPlaylistDraftState : ViewModel() {
     val items = mutableStateListOf<PlaylistDraftItem>()
     var initialized = false
+    /** Library entry this draft updates when applied; null creates a new one. */
+    var savedPlaylistId by mutableStateOf<String?>(null)
+    var playlistName by mutableStateOf<String?>(null)
+    val watchedFolders = mutableStateListOf<WatchedFolder>()
+    /** MediaStore ids already offered from [watchedFolders]; never re-added. */
+    var knownMediaIds: Set<Long> = emptySet()
     var atmosphereGlassEnabled by mutableStateOf(false)
     var isProcessing by mutableStateOf(false)
     var applyCompleted by mutableStateOf(false)
