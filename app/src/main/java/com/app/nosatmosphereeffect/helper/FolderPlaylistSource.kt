@@ -43,8 +43,17 @@ internal object FolderPlaylistSource {
 
     val isAvailable: Boolean get() = BuildConfig.FOLDER_PLAYLISTS
 
-    /** Everything to request; the system shows its own full/partial choice. */
-    fun requestedPermissions(): Array<String> {
+    /**
+     * What to request. Normally both photo permissions, so the system offers
+     * its own "Allow all / Select photos" choice. With "Select photos" already
+     * granted, asking for READ_MEDIA_VISUAL_USER_SELECTED again only reopens
+     * the photo picker, so ask for full access alone to get the permission
+     * dialog (with "Allow all") back.
+     */
+    fun requestedPermissions(context: Context): Array<String> {
+        if (hasPartialAccessOnly(context)) {
+            return arrayOf(Manifest.permission.READ_MEDIA_IMAGES)
+        }
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             arrayOf(
                 Manifest.permission.READ_MEDIA_IMAGES,

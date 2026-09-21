@@ -192,7 +192,7 @@ class MainActivity : ComponentActivity() {
         ) {
             // Once per launch: without full photo access new images stay invisible.
             folderAccessRequested = true
-            requestFolderAccess.launch(FolderPlaylistSource.requestedPermissions())
+            requestFolderAccess.launch(FolderPlaylistSource.requestedPermissions(this))
         }
         ioExecutor.execute {
             try {
