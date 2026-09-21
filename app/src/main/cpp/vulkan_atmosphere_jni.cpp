@@ -376,6 +376,7 @@ Java_com_app_nosatmosphereeffect_renderer_vulkan_VulkanAtmosphereNative_nativeSe
     jfloat clockOpacity,
     jboolean clockUploaded,
     jboolean clockDepth,
+    jboolean clockGlass,
     jfloatArray blobColors,
     jfloatArray blobPositions,
     jfloatArray blobSizes,
@@ -420,6 +421,7 @@ Java_com_app_nosatmosphereeffect_renderer_vulkan_VulkanAtmosphereNative_nativeSe
     // way viewport[3] above is.
     params.clockMeta[2] =
         clockDepth == JNI_TRUE && hasSubject == JNI_TRUE ? 1.0F : 0.0F;
+    params.clockMeta[3] = clockGlass == JNI_TRUE ? 1.0F : 0.0F;
 
     if (!readBlobArrays(
             env,

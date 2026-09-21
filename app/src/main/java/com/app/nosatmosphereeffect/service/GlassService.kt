@@ -7,7 +7,6 @@ import com.app.nosatmosphereeffect.helper.ClockPreferences
 import com.app.nosatmosphereeffect.helper.GLWallpaperService
 import com.app.nosatmosphereeffect.helper.GlassEffectPreferences
 import com.app.nosatmosphereeffect.helper.GlassEffectPolicy
-import com.app.nosatmosphereeffect.helper.PlaylistModeManager
 import com.app.nosatmosphereeffect.renderer.GlassRenderController
 
 abstract class GlassWallpaperService protected constructor(
@@ -50,9 +49,7 @@ abstract class GlassWallpaperService protected constructor(
             ClockPreferences.read(
                 preferences = preferences,
                 effectId = effectId,
-                singleImageMode = !PlaylistModeManager.isPlaylistMode(
-                    applicationContext
-                ),
+                singleImageMode = isClockSingleImageMode(),
                 lockedProgress = lockedProgress,
                 unlockedProgress = unlockedProgress
             )

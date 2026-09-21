@@ -6,7 +6,6 @@ import com.app.nosatmosphereeffect.helper.AtmosphereGlassPolicy
 import com.app.nosatmosphereeffect.helper.ClockPreferences
 import com.app.nosatmosphereeffect.helper.GLWallpaperService
 import com.app.nosatmosphereeffect.helper.GlassEffectPreferences
-import com.app.nosatmosphereeffect.helper.PlaylistModeManager
 import com.app.nosatmosphereeffect.renderer.AtmosphereRenderController
 
 class AtmosphereService :
@@ -70,9 +69,7 @@ class AtmosphereService :
             ClockPreferences.read(
                 preferences = preferences,
                 effectId = effectId,
-                singleImageMode = !PlaylistModeManager.isPlaylistMode(
-                    applicationContext
-                ),
+                singleImageMode = isClockSingleImageMode(),
                 lockedProgress = lockedProgress,
                 unlockedProgress = unlockedProgress
             )

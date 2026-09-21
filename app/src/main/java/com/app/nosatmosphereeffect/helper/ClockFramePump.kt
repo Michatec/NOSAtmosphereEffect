@@ -40,7 +40,12 @@ class ClockFramePump(
     private val onTick: () -> Unit
 ) {
     private val appContext = context.applicationContext
-    private val handler = Handler(Looper.getMainLooper())
+    /**
+     * Created on the first scheduled tick, not at construction: an engine
+     * whose clock is off never needs one, and building a controller then no
+     * longer requires a main looper (which plain JVM unit tests do not have).
+     */
+    private var handler: Handler? = null
 
     private var enabled = false
     private var showSeconds = false
@@ -95,11 +100,12 @@ class ClockFramePump(
     private fun schedule() {
         if (closed || scheduled || !enabled || !visible) return
         scheduled = true
-        handler.postDelayed(tickRunnable, delayToNextBoundaryMs())
+        val target = handler ?: Handler(Looper.getMainLooper()).also { handler = it }
+        target.postDelayed(tickRunnable, delayToNextBoundaryMs())
     }
 
     private fun cancel() {
-        handler.removeCallbacks(tickRunnable)
+        handler?.removeCallbacks(tickRunnable)
         scheduled = false
     }
 

@@ -14,6 +14,7 @@ import android.view.SurfaceHolder
 import android.view.animation.LinearInterpolator
 import com.app.nosatmosphereeffect.helper.GLWallpaperService
 import com.app.nosatmosphereeffect.helper.EffectStatePolicy
+import com.app.nosatmosphereeffect.helper.PlaylistModeManager
 import com.app.nosatmosphereeffect.helper.PlaylistRotationController
 import com.app.nosatmosphereeffect.helper.WallpaperBehaviorPolicy
 import com.app.nosatmosphereeffect.helper.WallpaperBehaviorPreferences
@@ -64,6 +65,17 @@ abstract class AnimatedEffectWallpaperService<R : Any> : GLWallpaperService() {
     protected open fun onEngineVisibilityChanged(renderer: R?, visible: Boolean) = Unit
 
     protected open fun releaseRenderer(renderer: R) = Unit
+
+    /**
+     * Whether the clock may show: it is single-image only (a position
+     * calibrated against one photo is wrong for the next). Read defensively,
+     * like SubjectIsolationBackendPolicy — the clock is decoration, and a
+     * failure deciding the playlist mode must not abort configuring the
+     * effect itself.
+     */
+    protected fun isClockSingleImageMode(): Boolean = runCatching {
+        !PlaylistModeManager.isPlaylistMode(applicationContext)
+    }.getOrDefault(true)
 
     final override fun onCreateEngine(): Engine {
         return EffectEngine().also(activeEngines::add)

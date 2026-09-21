@@ -76,12 +76,11 @@ internal class VulkanClockTextureUploader(context: Context) {
         return face.render(
             nowMillis = System.currentTimeMillis(),
             uptimeMs = uptime,
-            // Vulkan reallocates the sampled image on every upload, so
-            // animation frames are throttled harder than on GLES, where the
-            // same call is a texSubImage2D into existing storage. The entry
-            // animation gets a shorter interval anyway: it plays once when
-            // the wallpaper appears, and 20fps is visibly choppy for the one
-            // animation the user is actually watching.
+            // The native side now overwrites the bound image in place when
+            // the extent is unchanged (it always is — the face bitmap has a
+            // fixed size), so an animation frame costs a staging copy rather
+            // than an image allocation plus vkDeviceWaitIdle. The remaining
+            // throttle only bounds the per-frame Canvas redraw.
             minimumIntervalMs = if (face.isEntering(uptime)) {
                 ENTRY_MIN_INTERVAL_MS
             } else {
@@ -114,9 +113,9 @@ internal class VulkanClockTextureUploader(context: Context) {
     }
 
     private companion object {
-        /** ~20fps ceiling on animation re-uploads. */
-        const val ANIMATION_MIN_INTERVAL_MS = 50L
-        /** ~40fps while the entry animation is playing. */
-        const val ENTRY_MIN_INTERVAL_MS = 24L
+        /** ~30fps ceiling on digit-change re-uploads. */
+        const val ANIMATION_MIN_INTERVAL_MS = 33L
+        /** ~60fps while the one-off entry animation is playing. */
+        const val ENTRY_MIN_INTERVAL_MS = 16L
     }
 }

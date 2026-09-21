@@ -68,6 +68,16 @@ Canvas Sketch, Glass Effect, Atmosphere with Glass, and Halftone Print share the
 
 If Canvas Sketch cannot find a confident foreground subject, it falls back to sketching the complete wallpaper. A background-only effect waits for a usable mask instead of applying across an unprotected subject. Wallpaper image contents and generated masks never leave the device. Atmo Engine does not request the `INTERNET` or `ACCESS_NETWORK_STATE` permission. In the Google Play build, Google Play services may use its own network access only when the user requests the optional model download.
 
+#### Wallpaper Clock
+
+Every effect can draw a clock into the wallpaper itself (Advanced Settings → Clock; single-image mode only). **Choose style, position & size** opens a live preview where you drag and resize it and pick a face, colour (including one taken from the wallpaper) and 12/24-hour format.
+
+* **Depth effect:** Draws the photo's subject back over the clock, so the clock sits behind them.
+* **Adaptive size:** Like the One UI lock-screen clock, the clock shrinks (keeping its top edge) until the digits no longer touch the subject. If even its smallest size would still overlap, it keeps its full size and the depth effect puts it behind the subject instead. The subject is analysed once per wallpaper, on the device, and the result is cached.
+* **Liquid Glass face:** Huge stacked digits made of glass. The wallpaper shows through them, bent at the rounded edges, softly frosted inside and lit along the top.
+
+Depth and adaptive size use the same on-device subject model as subject isolation (see above).
+
 ### 2\. Select Image & Playlist Mode
 After selecting an effect, you will be prompted to choose your wallpaper mode:
 

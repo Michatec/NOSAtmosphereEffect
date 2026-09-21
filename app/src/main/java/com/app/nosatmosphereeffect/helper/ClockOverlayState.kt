@@ -34,6 +34,14 @@ data class ClockOverlayState(
      * [AtmosphereClockPolicy.supportsDepth].
      */
     val depthEnabled: Boolean = AtmosphereClockPolicy.DEFAULT_DEPTH,
+    /** Shrink to stay clear of the subject — see [AtmosphereClockPolicy.ADAPTIVE_KEY]. */
+    val adaptive: Boolean = AtmosphereClockPolicy.DEFAULT_ADAPTIVE,
+    /**
+     * Derived, not a preference: the size factor the adaptive layout settled
+     * on for the current wallpaper, 1.0 when adaptive is off or nothing is in
+     * the way. Computed off the render thread by ClockSubjectLayout.
+     */
+    val adaptiveScale: Float = 1f,
     val styleId: String = ClockStyle.DEFAULT.id,
     val showSeconds: Boolean = AtmosphereClockPolicy.DEFAULT_SECONDS,
     val animate: Boolean = AtmosphereClockPolicy.DEFAULT_ANIMATE,
@@ -108,7 +116,13 @@ data class ClockOverlayState(
             screenId = ClockScreenPolicy.sanitizeScreenId(screenId),
             lockedProgress = lockedProgress.finiteOr(0f),
             unlockedProgress = unlockedProgress.finiteOr(1f),
-            textureAspect = textureAspect.finiteOr(1f).coerceIn(0.05f, 20f)
+            textureAspect = textureAspect.finiteOr(1f).coerceIn(0.05f, 20f),
+            adaptiveScale = if (adaptive) {
+                adaptiveScale.finiteOr(1f)
+                    .coerceIn(AtmosphereClockPolicy.MIN_ADAPTIVE_SCALE, 1f)
+            } else {
+                1f
+            }
         )
     }
 
@@ -147,7 +161,15 @@ data class ClockOverlayState(
      * these two numbers together anyway.
      */
     val renderHeight: Float
+        get() = height * heightScale * adaptiveScale
+
+    /** The stretched height before any adaptive shrink. */
+    val stretchedHeight: Float
         get() = height * heightScale
+
+    /** True when the face should be drawn as refracting glass. */
+    val liquidGlass: Boolean
+        get() = style.liquidGlass
 
     /**
      * The top edge the renderers should actually use.
@@ -160,7 +182,11 @@ data class ClockOverlayState(
      * slider changes the shape and nothing else.
      */
     val renderTop: Float
-        get() = top + (height - renderHeight) / 2f
+        // Centred on the stretched box, then anchored at that box's top edge:
+        // an adaptive shrink pulls the bottom up and away from the subject
+        // rather than shrinking towards the middle, which is how the clock
+        // makes room without appearing to move.
+        get() = top + (height - stretchedHeight) / 2f
 
     /**
      * The texture aspect the renderers should actually use, given the face

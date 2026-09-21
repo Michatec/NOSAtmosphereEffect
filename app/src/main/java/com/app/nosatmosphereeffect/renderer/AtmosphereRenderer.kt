@@ -12,6 +12,7 @@ import androidx.core.graphics.createBitmap
 import com.app.nosatmosphereeffect.helper.AtmosphereClockPolicy
 import com.app.nosatmosphereeffect.helper.ClockScreen
 import com.app.nosatmosphereeffect.helper.ClockScreenPolicy
+import com.app.nosatmosphereeffect.helper.ClockOverlayState
 import com.app.nosatmosphereeffect.helper.ClockStyle
 import com.app.nosatmosphereeffect.helper.ClockTextureProvider
 import com.app.nosatmosphereeffect.helper.GlassEffectPolicy
@@ -147,13 +148,14 @@ class AtmosphereRenderer(
             field = AtmosphereClockPolicy.sanitizeTop(value)
         }
     @Volatile var clockHeight: Float = AtmosphereClockPolicy.DEFAULT_HEIGHT
-    @Volatile var clockWidthScale: Float =
-        AtmosphereClockPolicy.DEFAULT_WIDTH_SCALE
-    @Volatile var clockHeightScale: Float =
-        AtmosphereClockPolicy.DEFAULT_HEIGHT_SCALE
-        set(value) {
-            field = AtmosphereClockPolicy.sanitizeHeight(value)
-        }
+    /**
+     * Placement (size, per-axis stretch, adaptive shrink) as the shared
+     * overlay state, so this renderer computes the clock rectangle with the
+     * exact rules every other effect and the Vulkan host use. It used to
+     * compute its own from flat fields, and the width/height stretch never
+     * reached it at all — the sliders did nothing on this backend.
+     */
+    @Volatile var clockLayout: ClockOverlayState = ClockOverlayState()
     @Volatile var clockOpacity: Float = AtmosphereClockPolicy.DEFAULT_OPACITY
         set(value) {
             field = AtmosphereClockPolicy.sanitizeOpacity(value)
@@ -817,14 +819,11 @@ class AtmosphereRenderer(
         // The per-axis stretch is folded in the same way the other effects
         // do it — see ClockOverlayState.renderHeight for why that needs no
         // extra uniform.
-        val safeHeightScale = if (clockHeightScale > 0f) clockHeightScale else 1f
-        val heightUv = clockHeight * safeHeightScale
-        val widthUv = heightUv *
-            (clockTexture.aspectRatio * clockWidthScale / safeHeightScale) /
-            aspectRatio
-        // Re-centred rather than anchored at the top edge, so raising the
-        // height slider grows the clock both ways instead of sinking it.
-        val topUv = clockTop + (clockHeight - heightUv) / 2f
+        val layout = clockLayout
+        val heightUv = layout.renderHeight
+        val safeAspect = if (aspectRatio.isFinite() && aspectRatio > 0f) aspectRatio else 1f
+        val widthUv = heightUv * layout.renderTextureAspect(clockTexture.aspectRatio) / safeAspect
+        val topUv = layout.renderTop
         GLES30.glUniform4f(
             GLES30.glGetUniformLocation(programId, "uClockRect"),
             clockCenterX - widthUv / 2f,
@@ -835,6 +834,10 @@ class AtmosphereRenderer(
         GLES30.glUniform1f(
             GLES30.glGetUniformLocation(programId, "uClockOpacity"),
             clockOpacity * visibility
+        )
+        GLES30.glUniform1f(
+            GLES30.glGetUniformLocation(programId, "uClockGlass"),
+            if (layout.liquidGlass) 1f else 0f
         )
         GLES30.glUniform1f(
             GLES30.glGetUniformLocation(programId, "uClockDepth"),

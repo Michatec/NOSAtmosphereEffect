@@ -6,7 +6,6 @@ import android.util.Log
 import com.app.nosatmosphereeffect.helper.CanvasSubjectSettings
 import com.app.nosatmosphereeffect.helper.ClockPreferences
 import com.app.nosatmosphereeffect.helper.GLWallpaperService
-import com.app.nosatmosphereeffect.helper.PlaylistModeManager
 import com.app.nosatmosphereeffect.helper.SubjectIsolationPolicy
 import com.app.nosatmosphereeffect.renderer.ColorFillRenderController
 import com.app.nosatmosphereeffect.renderer.FrostedRenderController
@@ -52,9 +51,7 @@ abstract class ColorFillWallpaperService protected constructor(
             ClockPreferences.read(
                 preferences = preferences,
                 effectId = effectId,
-                singleImageMode = !PlaylistModeManager.isPlaylistMode(
-                    applicationContext
-                ),
+                singleImageMode = isClockSingleImageMode(),
                 lockedProgress = lockedProgress,
                 unlockedProgress = unlockedProgress
             )
@@ -136,9 +133,7 @@ abstract class FrostedWallpaperService protected constructor(
             ClockPreferences.read(
                 preferences = preferences,
                 effectId = effectId,
-                singleImageMode = !PlaylistModeManager.isPlaylistMode(
-                    applicationContext
-                ),
+                singleImageMode = isClockSingleImageMode(),
                 lockedProgress = lockedProgress,
                 unlockedProgress = unlockedProgress
             )
@@ -230,9 +225,7 @@ abstract class HalftoneWallpaperService protected constructor(
             ClockPreferences.read(
                 preferences = preferences,
                 effectId = effectId,
-                singleImageMode = !PlaylistModeManager.isPlaylistMode(
-                    applicationContext
-                ),
+                singleImageMode = isClockSingleImageMode(),
                 lockedProgress = lockedProgress,
                 unlockedProgress = unlockedProgress
             )
@@ -319,9 +312,7 @@ abstract class NeonWallpaperService protected constructor(
             ClockPreferences.read(
                 preferences = preferences,
                 effectId = effectId,
-                singleImageMode = !PlaylistModeManager.isPlaylistMode(
-                    applicationContext
-                ),
+                singleImageMode = isClockSingleImageMode(),
                 lockedProgress = lockedProgress,
                 unlockedProgress = unlockedProgress
             )

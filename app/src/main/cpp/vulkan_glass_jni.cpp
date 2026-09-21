@@ -210,7 +210,8 @@ Java_com_app_nosatmosphereeffect_renderer_vulkan_VulkanGlassNative_nativeSetStat
     jfloat clockTextureAspect,
     jfloat clockOpacity,
     jboolean clockUploaded,
-    jboolean clockDepth
+    jboolean clockDepth,
+    jboolean clockGlass
 ) {
     atmo::vulkan::OnePassHandle engine = fromHandle(handle);
     if (engine == nullptr) return JNI_FALSE;
@@ -242,7 +243,8 @@ Java_com_app_nosatmosphereeffect_renderer_vulkan_VulkanGlassNative_nativeSetStat
         clockTextureAspect,
         clockOpacity,
         clockUploaded == JNI_TRUE,
-        clockDepth == JNI_TRUE && hasSubject == JNI_TRUE
+        clockDepth == JNI_TRUE && hasSubject == JNI_TRUE,
+        clockGlass == JNI_TRUE
     );
     return atmo::vulkan::setPushConstants(engine, &params, sizeof(params))
         ? JNI_TRUE

@@ -48,7 +48,8 @@ internal object VulkanGlassNative {
         clockTextureAspect: Float,
         clockOpacity: Float,
         clockUploaded: Boolean,
-        clockDepth: Boolean
+        clockDepth: Boolean,
+        clockGlass: Boolean
     ): Boolean
 
     external fun nativeRender(handle: Long): Int
@@ -120,7 +121,8 @@ internal object VulkanGlassBridge : VulkanSingleImageBridge<GlassRenderState> {
             // policy in it and both backends share one curve.
             clockOpacity = safe.clock.effectiveOpacity(safe.progress),
             clockUploaded = safe.clock.faceUploaded,
-            clockDepth = safe.clock.depthEnabled
+            clockDepth = safe.clock.depthEnabled,
+            clockGlass = safe.clock.liquidGlass
         )) {
             "The native Vulkan Glass state could not be updated"
         }

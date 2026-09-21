@@ -1956,6 +1956,33 @@ private:
                     )
                 ) + 1U;
         }
+        // Same extent and mip chain as what is already bound: overwrite it in
+        // place. The clock face re-uploads the same fixed-size bitmap on every
+        // animation frame, and the full path below costs an image allocation,
+        // a view, a sampler, a descriptor write and a vkDeviceWaitIdle each
+        // time. Waiting on the render fence is enough here: every GPU read of
+        // this texture happens inside a render submission guarded by it, and
+        // uploads run on the same thread as render(), so nothing new can be
+        // submitted in between. If the in-place copy fails part-way the image
+        // is in an unknown layout, so fall through and replace it entirely.
+        TextureResource& bound = textures_[binding];
+        if (bound.ready &&
+            bound.image != VK_NULL_HANDLE &&
+            bound.width == width &&
+            bound.height == height &&
+            bound.mipLevels == replacement.mipLevels &&
+            (renderFence_ == VK_NULL_HANDLE ||
+             vkWaitForFences(
+                 device_,
+                 1,
+                 &renderFence_,
+                 VK_TRUE,
+                 std::numeric_limits<uint64_t>::max()
+             ) == VK_SUCCESS)) {
+            if (copyBufferToTexture(stagingBuffer, bound)) return true;
+            logError(label_ + " in-place texture update failed; reallocating");
+        }
+
         if (!createTextureImage(replacement) ||
             !copyBufferToTexture(stagingBuffer, replacement) ||
             !createTextureViewAndSampler(replacement)) {

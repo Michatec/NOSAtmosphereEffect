@@ -61,7 +61,15 @@ enum class ClockStyle(
      * Paired with [verticalStretch] rather than used alone. Tall-and-narrow is
      * what reads as a display clock; tall-and-wide just reads as large.
      */
-    val horizontalScale: Float = 1f
+    val horizontalScale: Float = 1f,
+    /**
+     * Drawn as refracting glass rather than solid colour: the shader bends,
+     * softens and highlights the wallpaper through the glyph shapes (see
+     * `compositeClock` in the effect shaders). The face bitmap only supplies
+     * the shape, so it is drawn without a drop shadow — a shadow would read
+     * as frosted glass outside the digits.
+     */
+    val liquidGlass: Boolean = false
 ) {
     MODERN(
         id = "modern",
@@ -244,6 +252,26 @@ enum class ClockStyle(
         separatorAlpha = 0.75f,
         verticalStretch = 1.56f,
         horizontalScale = 0.86f
+    ),
+
+    /**
+     * Big, heavy stacked digits made of glass: the wallpaper shows through,
+     * bent at the rounded edges and lit along the top like a thick lens. The
+     * heaviest cut is used because glass needs mass — thin strokes leave too
+     * little area for the refraction to read.
+     */
+    LIQUID_GLASS(
+        id = "liquid_glass",
+        label = "Liquid Glass",
+        description = "Huge stacked glass digits",
+        familyName = "sans-serif-black",
+        weight = 900,
+        letterSpacingEm = -0.035f,
+        stacked = true,
+        separatorAlpha = 0f,
+        verticalStretch = 1.48f,
+        horizontalScale = 0.98f,
+        liquidGlass = true
     );
 
     fun typeface(): Typeface {
@@ -509,6 +537,31 @@ class ClockFaceRenderer(private val context: Context) {
         return target
     }
 
+    /**
+     * Where the glyphs sit inside the face bitmap, without drawing anything.
+     * The bitmap carries generous padding for the animations; the adaptive
+     * layout needs the digits' real extent so it does not shrink the clock
+     * to keep empty padding clear of the subject.
+     */
+    fun measureFace(nowMillis: Long): ClockFaceBox {
+        val face = ensureLayout(formatRows(nowMillis))
+        val bitmapWidth = face.contentWidth + face.paddingX * 2f
+        val bitmapHeight = face.contentHeight + face.paddingY * 2f
+        val bounds = android.graphics.Rect()
+        textPaint.getTextBounds(DIGITS_SAMPLE, 0, DIGITS_SAMPLE.length, bounds)
+        val glyphTop = face.paddingY +
+            face.rowBaselines.first() + bounds.top * face.verticalStretch
+        val glyphBottom = face.paddingY +
+            face.rowBaselines.last() + bounds.bottom * face.verticalStretch
+        return ClockFaceBox(
+            aspect = bitmapWidth / bitmapHeight,
+            left = face.paddingX / bitmapWidth,
+            top = (glyphTop / bitmapHeight).coerceIn(0f, 1f),
+            right = (face.paddingX + face.contentWidth) / bitmapWidth,
+            bottom = (glyphBottom / bitmapHeight).coerceIn(0f, 1f)
+        )
+    }
+
     /** Re-reads the system 12/24-hour setting; call on a config change. */
     fun refreshFormat() {
         val updated = DateFormat.is24HourFormat(context)
@@ -676,12 +729,16 @@ class ClockFaceRenderer(private val context: Context) {
         textPaint.textScaleX = style.horizontalScale
         // Shadow strength tracks alpha so a fading digit does not leave a
         // hard drop shadow behind it.
-        textPaint.setShadowLayer(
-            face.textSize * SHADOW_RADIUS_EM * bloom,
-            0f,
-            face.textSize * SHADOW_DY_EM,
-            Color.argb((0x66 * finalAlpha).toInt().coerceIn(0, 255), 0, 0, 0)
-        )
+        if (style.liquidGlass) {
+            textPaint.clearShadowLayer()
+        } else {
+            textPaint.setShadowLayer(
+                face.textSize * SHADOW_RADIUS_EM * bloom,
+                0f,
+                face.textSize * SHADOW_DY_EM,
+                Color.argb((0x66 * finalAlpha).toInt().coerceIn(0, 255), 0, 0, 0)
+            )
+        }
 
         val text = character.toString()
         val glyphWidth = textPaint.measureText(text)
@@ -1017,5 +1074,18 @@ class ClockFaceRenderer(private val context: Context) {
         const val DEFAULT_SLOT_COUNT = 5
 
         const val NO_TRANSITION = Long.MIN_VALUE
+        const val DIGITS_SAMPLE = "0123456789"
     }
 }
+
+/**
+ * The glyphs' extent inside a face bitmap, as fractions of its width and
+ * height, plus the bitmap's own aspect ratio.
+ */
+data class ClockFaceBox(
+    val aspect: Float,
+    val left: Float,
+    val top: Float,
+    val right: Float,
+    val bottom: Float
+)

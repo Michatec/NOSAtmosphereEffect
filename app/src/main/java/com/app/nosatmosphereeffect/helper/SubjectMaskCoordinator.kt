@@ -25,6 +25,8 @@ internal class SubjectMaskCoordinator(
     private var latestRequest = -1L
     private var extractor: SubjectMaskExtractor? = null
     private var pendingMask: PendingMask? = null
+    /** Cache fingerprint of the image each in-flight generation was cut from. */
+    private val fingerprints = HashMap<Long, Long>()
 
     fun configure(enabled: Boolean): Boolean {
         var extractorToClose: SubjectMaskExtractor? = null
@@ -55,19 +57,44 @@ internal class SubjectMaskCoordinator(
      * served on a dropped request means it is never retried.
      */
     fun request(bitmap: Bitmap, generation: Long): Boolean {
+        // Fingerprinted before taking the lock: it reads ~2k pixels, and the
+        // caller recycles [bitmap] as soon as this returns.
+        val fingerprint = if (bitmap.isRecycled) null else SubjectMaskCache.fingerprint(bitmap)
+        val cached = fingerprint?.let(SubjectMaskCache::get)
         val activeExtractor = synchronized(lock) {
-            if (closed || !enabled || bitmap.isRecycled) return false
+            if (closed || !enabled || bitmap.isRecycled) {
+                cached?.recycle()
+                return false
+            }
             // One extraction per image. Callers can ask repeatedly — the GLES
             // renderer used to, once per frame, while waiting for a mask — and
             // segmentation is far too expensive to run speculatively. A new
             // image gets a new generation; configure(false) resets this, so
             // toggling the feature off and on still re-runs it.
-            if (latestRequest == generation) return false
+            if (latestRequest == generation) {
+                cached?.recycle()
+                return false
+            }
             latestRequest = generation
-            extractor ?: SubjectMaskExtractor(
+            if (cached != null) null else extractor ?: SubjectMaskExtractor(
                 appContext,
                 ::onMaskResult
             ).also { extractor = it }
+        }
+        if (activeExtractor == null) {
+            // Same pixels were segmented recently: serve that result instead
+            // of running inference again.
+            onMaskResult(generation, cached)
+            return true
+        }
+        if (fingerprint != null) {
+            synchronized(lock) {
+                fingerprints[generation] = fingerprint
+                // Only the newest few generations can still deliver.
+                while (fingerprints.size > MAX_TRACKED_GENERATIONS) {
+                    fingerprints.remove(fingerprints.keys.min())
+                }
+            }
         }
         activeExtractor.extract(bitmap, generation)
         return true
@@ -86,7 +113,11 @@ internal class SubjectMaskCoordinator(
     }
 
     private fun onMaskResult(generation: Long, bitmap: Bitmap?) {
+        val fingerprint = synchronized(lock) { fingerprints.remove(generation) }
         if (bitmap == null) return
+        // Cached even when this particular consumer has moved on: the next
+        // engine or surface to show the same photo wants exactly this mask.
+        if (fingerprint != null) SubjectMaskCache.put(fingerprint, bitmap)
 
         var replaced: Bitmap? = null
         val accepted = synchronized(lock) {
@@ -124,6 +155,10 @@ internal class SubjectMaskCoordinator(
         }
         extractorToClose?.close()
         bitmapToRecycle.recycleSafely()
+    }
+
+    private companion object {
+        const val MAX_TRACKED_GENERATIONS = 8
     }
 
     private fun Bitmap?.recycleSafely() {

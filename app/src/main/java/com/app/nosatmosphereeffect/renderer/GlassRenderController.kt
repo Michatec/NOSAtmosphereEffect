@@ -115,7 +115,8 @@ class GlassRenderController(
         context = appContext,
         workerName = "AtmoClockGlass",
         onTick = ::onClockTick,
-        onColorResolved = ::onClockColorResolved
+        onColorResolved = ::onClockColorResolved,
+        onLayoutResolved = ::onClockLayoutResolved
     )
 
     fun configureClock(clock: ClockOverlayState) {
@@ -153,6 +154,17 @@ class GlassRenderController(
             gl?.onClockTimeChanged()
             vk?.onTimeChanged()
         }
+        requestRenderForClock()
+    }
+
+    /** The adaptive clock's size for this wallpaper became known. */
+    private fun onClockLayoutResolved(scale: Float) {
+        val snapshot = synchronized(lock) {
+            if (closed || state.clock.adaptiveScale == scale) return
+            state = state.copy(clock = state.clock.copy(adaptiveScale = scale)).sanitized()
+            state
+        }
+        applyState(snapshot)
         requestRenderForClock()
     }
 
