@@ -182,8 +182,8 @@ class MainActivity : ComponentActivity() {
 
     /**
      * Keeps the saved-playlist library current: adopts a playlist applied
-     * before the library existed, and (folder build) adds images that appeared
-     * in the active playlist's watched folders since the app was last opened.
+     * before the library existed, and (folder build) mirrors the active
+     * playlist's watched folders, adding new images and dropping deleted ones.
      */
     private fun syncPlaylistLibrary() {
         if (FolderPlaylistSource.isAvailable && !folderAccessRequested &&
@@ -194,7 +194,6 @@ class MainActivity : ComponentActivity() {
             folderAccessRequested = true
             requestFolderAccess.launch(FolderPlaylistSource.requestedPermissions())
         }
-        val bounds = windowManager.currentWindowMetrics.bounds
         ioExecutor.execute {
             try {
                 WallpaperStorageCoordinator.runExclusive {
@@ -204,20 +203,19 @@ class MainActivity : ComponentActivity() {
                         SavedPlaylistLibrary.preserveActive(this)
                     }
                 }
-                val added = FolderPlaylistSource.syncActivePlaylist(
-                    this,
-                    bounds.width(),
-                    bounds.height()
-                )
-                if (added > 0) {
+                val result = FolderPlaylistSource.syncActivePlaylist(this)
+                if (result.changed) {
+                    val message = listOfNotNull(
+                        result.added.takeIf { it > 0 }?.let {
+                            if (it == 1) "added 1 new image" else "added $it new images"
+                        },
+                        result.removed.takeIf { it > 0 }?.let {
+                            if (it == 1) "removed 1 deleted image" else "removed $it deleted images"
+                        }
+                    ).joinToString(" and ").replaceFirstChar(Char::uppercase)
                     runOnUiThread {
                         if (isDestroyed) return@runOnUiThread
-                        Toast.makeText(
-                            this,
-                            if (added == 1) "Added 1 new image from your folders"
-                            else "Added $added new images from your folders",
-                            Toast.LENGTH_SHORT
-                        ).show()
+                        Toast.makeText(this, "Folders synced: $message", Toast.LENGTH_SHORT).show()
                     }
                 }
             } catch (error: Exception) {

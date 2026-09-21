@@ -21,6 +21,7 @@ import androidx.compose.runtime.setValue
 import androidx.core.view.WindowCompat
 import com.app.nosatmosphereeffect.helper.AtmosphereGlassPolicy
 import com.app.nosatmosphereeffect.helper.FolderPlaylistSource
+import com.app.nosatmosphereeffect.helper.FolderSyncPolicy
 import com.app.nosatmosphereeffect.helper.MediaImage
 import com.app.nosatmosphereeffect.helper.GlassEffectPreferences
 import com.app.nosatmosphereeffect.helper.GlassEffectSettings
@@ -548,7 +549,8 @@ class PlaylistEditorActivity : ComponentActivity() {
                         editedFilePath = item.editedFilePath,
                         matrixState = item.matrixState,
                         fitMode = item.fitMode,
-                        fillMode = item.fillMode
+                        fillMode = item.fillMode,
+                        mediaId = item.mediaId
                     )
                 },
                 stagedImages = stagedImages,
@@ -761,17 +763,38 @@ class PlaylistEditorActivity : ComponentActivity() {
         addNewFolderImages()
     }
 
-    /** Appends images in the watched folders that this draft has not seen yet. */
+    /**
+     * Mirrors the watched folders into the draft: appends images this draft
+     * has not seen and drops entries whose source image was deleted.
+     */
     private fun addNewFolderImages() {
         if (!FolderPlaylistSource.isAvailable || draftState.watchedFolders.isEmpty()) return
         if (!FolderPlaylistSource.hasFullAccess(this)) return
         val folderIds = draftState.watchedFolders.map(WatchedFolder::id)
         ioExecutor.execute {
+            // null means the folders could not be read; never treat that as
+            // "every image was deleted".
             val images = runCatching { FolderPlaylistSource.imagesIn(this, folderIds) }
                 .onFailure { error -> Log.w(TAG, "Could not read the watched folders", error) }
-                .getOrDefault(emptyList())
+                .getOrNull() ?: return@execute
             runOnUiThread {
                 if (isDestroyed) return@runOnUiThread
+                val present = images.mapTo(HashSet(), MediaImage::id)
+                val removed = FolderSyncPolicy.removableIndices(
+                    playlistItems.map(PlaylistItem::mediaId),
+                    present
+                )
+                removed.sortedDescending().forEach { index ->
+                    deleteCachedEdit(playlistItems.removeAt(index).editedFilePath)
+                }
+                if (removed.isNotEmpty()) {
+                    Toast.makeText(
+                        this,
+                        if (removed.size == 1) "1 deleted image removed"
+                        else "${removed.size} deleted images removed",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
                 val fresh = images.filter { it.id !in draftState.knownMediaIds }
                 if (fresh.isEmpty()) return@runOnUiThread
                 draftState.knownMediaIds = draftState.knownMediaIds + fresh.map(MediaImage::id)
@@ -779,7 +802,8 @@ class PlaylistEditorActivity : ComponentActivity() {
                     playlistItems += PlaylistItem(
                         originalUri = image.uri,
                         fitMode = defaultFitMode,
-                        fillMode = defaultFillMode
+                        fillMode = defaultFillMode,
+                        mediaId = image.id
                     )
                 }
                 Toast.makeText(
@@ -838,7 +862,12 @@ class PlaylistEditorActivity : ComponentActivity() {
                     editedFilePath = wallpaper.takeIf { savedEdited }?.absolutePath,
                     matrixState = matrix,
                     fitMode = fitMode,
-                    fillMode = fillMode
+                    fillMode = fillMode,
+                    mediaId = if (item.has(PlaylistCollectionStore.KEY_MEDIA_ID)) {
+                        item.getLong(PlaylistCollectionStore.KEY_MEDIA_ID)
+                    } else {
+                        null
+                    }
                 )
             }
             if (playlistItems.isEmpty()) loadLegacyPlaylist(playlistDir)

@@ -163,6 +163,31 @@ class PlaylistRotationPolicyTest {
         }
     }
 
+    @Test
+    fun `a deleted displayed image forces rotation before the interval elapses`() {
+        val decision = decide(
+            mode = PlaylistModeManager.MODE_STANDARD,
+            playlistSize = 1,
+            intervalMinutes = 60,
+            lastRotationMillis = NOW - MINUTE,
+            forceRotate = true
+        )
+
+        assertTrue(decision.shouldRotate)
+    }
+
+    @Test
+    fun `forced rotation still needs an image to rotate to`() {
+        val decision = decide(
+            mode = PlaylistModeManager.MODE_STANDARD,
+            playlistSize = 0,
+            forceRotate = true
+        )
+
+        assertFalse(decision.shouldRotate)
+        assertEquals(RotationSkipReason.EMPTY_PLAYLIST, decision.skipReason)
+    }
+
     private fun decide(
         mode: String,
         isThemeChange: Boolean = false,
@@ -170,7 +195,8 @@ class PlaylistRotationPolicyTest {
         activeThemeState: Int = -1,
         playlistSize: Int,
         intervalMinutes: Long = 0,
-        lastRotationMillis: Long = 0
+        lastRotationMillis: Long = 0,
+        forceRotate: Boolean = false
     ): RotationDecision {
         return PlaylistRotationPolicy.decide(
             mode = mode,
@@ -180,7 +206,8 @@ class PlaylistRotationPolicyTest {
             playlistSize = playlistSize,
             intervalMinutes = intervalMinutes,
             lastRotationMillis = lastRotationMillis,
-            nowMillis = NOW
+            nowMillis = NOW,
+            forceRotate = forceRotate
         )
     }
 
