@@ -192,17 +192,17 @@ This project is built using Kotlin, C++17, the Android NDK, and Gradle. The proj
 
 Atmo Engine keeps one shared codebase and combines two flavor dimensions:
 
-All artifacts in the table below use version name **7.2.0**.
+All artifacts in the table below use version name **7.2.3**.
 
 | Flavor | Minimum Android | Target SDK | Version code | Intended release |
 | --- | ---: |-----------:|-------------:| --- |
-| `v33Play` | Android 13 / API 33 |     API 33 |     `300720` | ML Kit APK |
-| `v33Fdroid` | Android 13 / API 33 |     API 33 |     `300720` | FOSS APK for F-Droid |
-| `v33Folder` | Android 13 / API 33 |     API 33 |     `300720` | ML Kit APK with folder playlists |
-| `v35Play` | Android 15 / API 35 |     API 36 |     `400720` | Google Play ML Kit AAB |
-| `v36Play` | Android 16 / API 36 |     API 36 |     `500720` | ML Kit APK |
-| `v36Fdroid` | Android 16 / API 36 |     API 36 |     `500720` | FOSS APK |
-| `v36Folder` | Android 16 / API 36 |     API 36 |     `500720` | ML Kit APK with folder playlists |
+| `v33Play` | Android 13 / API 33 |     API 33 |     `300723` | ML Kit APK |
+| `v33Fdroid` | Android 13 / API 33 |     API 33 |     `300723` | FOSS APK for F-Droid |
+| `v33Folder` | Android 13 / API 33 |     API 33 |     `300723` | ML Kit APK with folder playlists |
+| `v35Play` | Android 15 / API 35 |     API 36 |     `400723` | Google Play ML Kit AAB |
+| `v36Play` | Android 16 / API 36 |     API 36 |     `500723` | ML Kit APK |
+| `v36Fdroid` | Android 16 / API 36 |     API 36 |     `500723` | FOSS APK |
+| `v36Folder` | Android 16 / API 36 |     API 36 |     `500723` | ML Kit APK with folder playlists |
 
 The `play` source set contains only the ML Kit implementation and explicit model-download controller. The `fdroid` source set contains only [U2NetP](https://github.com/xuebinqin/U-2-Net), its model files, and the source-built FOSS LiteRT runtime. UI, effects, playlists, palette behavior, and settings remain shared in `main`. The `folder` flavor reuses the `play` source set and additionally declares `READ_MEDIA_IMAGES` and `READ_MEDIA_VISUAL_USER_SELECTED` for folder playlists; the Play Store and F-Droid builds do not request photo access. Model and runtime provenance is recorded in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 

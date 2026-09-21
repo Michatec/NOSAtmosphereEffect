@@ -3,8 +3,10 @@ package com.app.nosatmosphereeffect.service
 import android.content.SharedPreferences
 import android.graphics.Bitmap
 import com.app.nosatmosphereeffect.helper.AtmosphereGlassPolicy
+import com.app.nosatmosphereeffect.helper.ClockPreferences
 import com.app.nosatmosphereeffect.helper.GLWallpaperService
 import com.app.nosatmosphereeffect.helper.GlassEffectPreferences
+import com.app.nosatmosphereeffect.helper.PlaylistModeManager
 import com.app.nosatmosphereeffect.renderer.AtmosphereRenderController
 
 class AtmosphereService :
@@ -24,6 +26,20 @@ class AtmosphereService :
         renderer: AtmosphereRenderController
     ) {
         renderer.attach(engine)
+    }
+
+    /**
+     * The clock's frame cadence is owned by the controller's ClockFramePump,
+     * one per engine. This only tells it when to idle: a live wallpaper
+     * service can have a settings-preview engine and the real wallpaper alive
+     * at once, so anything service-wide would be torn down by whichever
+     * engine happened to die first.
+     */
+    override fun onEngineVisibilityChanged(
+        renderer: AtmosphereRenderController?,
+        visible: Boolean
+    ) {
+        renderer?.setEngineVisible(visible)
     }
 
     override fun configureRenderer(
@@ -46,6 +62,20 @@ class AtmosphereService :
             noiseEnabled = preferences.readBoolean("enable_noise", false),
             noiseScale = preferences.readFloat("noise_scale", 2_000f),
             noiseStrength = preferences.readFloat("noise_strength", 0.06f)
+        )
+        // Playlist and theme modes rotate the image underneath the clock, so
+        // the clock stays off there — a position calibrated against one photo
+        // is wrong for the next. See AtmosphereClockPolicy.resolveEnabled.
+        renderer.configureClock(
+            ClockPreferences.read(
+                preferences = preferences,
+                effectId = effectId,
+                singleImageMode = !PlaylistModeManager.isPlaylistMode(
+                    applicationContext
+                ),
+                lockedProgress = lockedProgress,
+                unlockedProgress = unlockedProgress
+            )
         )
     }
 
@@ -94,4 +124,5 @@ class AtmosphereService :
             fallback
         }
     }
+
 }

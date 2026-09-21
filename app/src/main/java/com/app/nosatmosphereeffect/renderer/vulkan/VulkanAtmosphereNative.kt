@@ -29,6 +29,16 @@ internal object VulkanAtmosphereNative {
 
     external fun nativeClearMask(handle: Long): Boolean
 
+    external fun nativeUploadClock(handle: Long, bitmap: Bitmap): Boolean
+
+    external fun nativeClearClock(handle: Long): Boolean
+
+    /**
+     * Drains every native error recorded since the last call. Not tied to a
+     * handle — the buffer is global, so it still returns the reason after the
+     * engine has been destroyed, which is when it is actually needed.
+     */
+
     external fun nativeSetState(
         handle: Long,
         progress: Float,
@@ -46,6 +56,13 @@ internal object VulkanAtmosphereNative {
         backgroundOnly: Boolean,
         hasSubject: Boolean,
         drawerBlur: Float,
+        clockCenterX: Float,
+        clockTop: Float,
+        clockHeightFraction: Float,
+        clockTextureAspect: Float,
+        clockOpacity: Float,
+        clockUploaded: Boolean,
+        clockDepth: Boolean,
         blobColors: FloatArray,
         blobPositions: FloatArray,
         blobSizes: FloatArray,
@@ -119,6 +136,20 @@ internal class VulkanAtmosphereBridge(
             backgroundOnly = safe.glassBackgroundOnly,
             hasSubject = safe.hasSubject,
             drawerBlur = safe.drawerBlur,
+            clockCenterX = safe.clockCenterX,
+            clockTop = safe.clockOverlay().renderTop,
+            // Per-axis stretch is folded into these two numbers rather than
+            // passed separately — see ClockOverlayState.renderHeight. Routed
+            // through the shared overlay state so Atmosphere's flat fields
+            // and the other effects cannot drift apart on the geometry.
+            clockHeightFraction = safe.clockOverlay().renderHeight,
+            clockTextureAspect = safe.clockOverlay()
+                .renderTextureAspect(safe.clockTextureAspect),
+            // The lock/home fade is applied here rather than in the shader
+            // so both backends share ClockScreenPolicy's single curve.
+            clockOpacity = safe.effectiveClockOpacity(),
+            clockUploaded = safe.clockEnabled && safe.clockFaceUploaded,
+            clockDepth = safe.clockEnabled && safe.clockDepthEnabled,
             blobColors = safe.blobs.colors,
             blobPositions = safe.blobs.positions,
             blobSizes = safe.blobs.sizes,
