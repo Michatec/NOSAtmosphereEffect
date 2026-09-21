@@ -30,7 +30,9 @@ abstract class GLWallpaperService : WallpaperService() {
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
         // The prepared posture image is a convenience, never a requirement.
-        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+        // Android 14+ only reports UI_HIDDEN and BACKGROUND (the RUNNING_*
+        // levels are deprecated and no longer delivered).
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
             WallpaperPostureCache.clear()
         }
     }
