@@ -16,6 +16,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import com.app.nosatmosphereeffect.helper.FolderPlaylistSource
 import com.app.nosatmosphereeffect.image.BitmapDecoder
 import com.app.nosatmosphereeffect.ui.screens.EffectSelectionScreen
 import com.app.nosatmosphereeffect.ui.screens.WallpaperModeSheet
@@ -87,6 +88,20 @@ class EffectSelectionActivity : ComponentActivity() {
                         onPickThemePlaylists = {
                             pendingMode = false
                             launchThemePlaylistEditor()
+                        },
+                        onOpenSaved = {
+                            pendingMode = false
+                            startActivity(SavedPlaylistsActivity.intent(this, selectedEffectId))
+                            finish()
+                        },
+                        onPickFolder = if (FolderPlaylistSource.isAvailable) {
+                            {
+                                pendingMode = false
+                                startActivity(FolderPickerActivity.intent(this, selectedEffectId))
+                                finish()
+                            }
+                        } else {
+                            null
                         }
                     )
                 }

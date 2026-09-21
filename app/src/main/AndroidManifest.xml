@@ -68,6 +68,8 @@
         <activity android:name=".activity.PlaylistEditorActivity"/>
         <activity android:name=".activity.ThemePlaylistEditorActivity" />
         <activity android:name=".activity.PaletteDiagnosticsActivity" />
+        <activity android:name=".activity.SavedPlaylistsActivity" />
+        <activity android:name=".activity.FolderPickerActivity" />
 
         <service
             android:name=".service.AtmosphereService"

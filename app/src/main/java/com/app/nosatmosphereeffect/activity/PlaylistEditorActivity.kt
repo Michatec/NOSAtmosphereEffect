@@ -20,20 +20,27 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.view.WindowCompat
 import com.app.nosatmosphereeffect.helper.AtmosphereGlassPolicy
+import com.app.nosatmosphereeffect.helper.FolderPlaylistSource
+import com.app.nosatmosphereeffect.helper.MediaImage
 import com.app.nosatmosphereeffect.helper.GlassEffectPreferences
 import com.app.nosatmosphereeffect.helper.GlassEffectSettings
 import com.app.nosatmosphereeffect.helper.MatrixStatePolicy
 import com.app.nosatmosphereeffect.helper.PlaylistModeManager
 import com.app.nosatmosphereeffect.helper.SystemColorSyncPreferences
 import com.app.nosatmosphereeffect.helper.WallpaperFitHelper
+import com.app.nosatmosphereeffect.storage.ActiveFolderWatch
 import com.app.nosatmosphereeffect.storage.FileTransactions
+import com.app.nosatmosphereeffect.storage.FolderWatchState
 import com.app.nosatmosphereeffect.storage.PlaylistCollectionStore
 import com.app.nosatmosphereeffect.storage.PlaylistImageSource
+import com.app.nosatmosphereeffect.storage.SavedPlaylistLibrary
 import com.app.nosatmosphereeffect.storage.SharedPreferencesTransactions
 import com.app.nosatmosphereeffect.storage.WallpaperStorageCoordinator
+import com.app.nosatmosphereeffect.storage.WatchedFolder
 import com.app.nosatmosphereeffect.ui.screens.PlaylistEditorScreen
 import com.app.nosatmosphereeffect.ui.screens.PlaylistEntry
 import com.app.nosatmosphereeffect.ui.screens.ProcessingOverlay
+import com.app.nosatmosphereeffect.ui.screens.RenamePlaylistDialog
 import com.app.nosatmosphereeffect.ui.screens.SimpleConfirmDialog
 import com.app.nosatmosphereeffect.ui.model.EffectCatalog
 import com.app.nosatmosphereeffect.ui.theme.AtmoEngineTheme
@@ -67,6 +74,14 @@ class PlaylistEditorActivity : ComponentActivity() {
     private var defaultFitMode by mutableStateOf(WallpaperFitHelper.MODE_FILL)
     private var defaultFillMode by mutableStateOf(WallpaperFitHelper.FILL_BLACK)
     private var showCropOptions by mutableStateOf(false)
+    private var showRename by mutableStateOf(false)
+
+    private val pickFolders =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == RESULT_OK) {
+                updateWatchedFolders(FolderPickerActivity.foldersFrom(result.data))
+            }
+        }
 
     private val pickMultipleImages =
         registerForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris: List<Uri> ->
@@ -120,7 +135,13 @@ class PlaylistEditorActivity : ComponentActivity() {
             WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
 
         effectId = intent.getStringExtra("EFFECT_ID") ?: "ORIGINAL"
-        isEditExisting = intent.getBooleanExtra("EDIT_EXISTING", false)
+        // Opening the saved entry of the active playlist edits the active copy,
+        // which may hold folder images newer than the saved one.
+        isEditExisting = intent.getBooleanExtra("EDIT_EXISTING", false) ||
+            intent.getStringExtra(EXTRA_SAVED_PLAYLIST_ID)?.let { id ->
+                id == SavedPlaylistLibrary.activeId(this) &&
+                    PlaylistModeManager.getMode(this) == PlaylistModeManager.MODE_STANDARD
+            } == true
         if (!draftState.initialized) {
             if (isEditExisting) {
                 defaultFitMode = WallpaperFitHelper.getDefaultFitMode(this)
@@ -144,10 +165,17 @@ class PlaylistEditorActivity : ComponentActivity() {
                     Bundle::class.java
                 )
             )
+            restoreLibraryState(savedInstanceState)
+            val savedPlaylistId = intent.getStringExtra(EXTRA_SAVED_PLAYLIST_ID)
+            val initialFolders = FolderPickerActivity.foldersFrom(intent)
             if (restored != null) {
                 playlistItems.addAll(restored)
             } else if (isEditExisting) {
-                loadExistingPlaylist()
+                loadActivePlaylist()
+            } else if (savedPlaylistId != null) {
+                loadSavedPlaylist(savedPlaylistId)
+            } else if (initialFolders.isNotEmpty()) {
+                updateWatchedFolders(initialFolders)
             } else {
                 val uris = intent.getParcelableArrayListExtra("IMAGE_URIS", Uri::class.java)
                     ?: intent.clipData?.let { clip ->
@@ -191,6 +219,24 @@ class PlaylistEditorActivity : ComponentActivity() {
                 }
                 PlaylistEditorScreen(
                     effectId = effectId,
+                    title = draftState.playlistName
+                        ?: if (isEditExisting || draftState.savedPlaylistId != null) {
+                            "Edit Playlist"
+                        } else {
+                            "New Playlist"
+                        },
+                    onRename = { showRename = true },
+                    watchedFolders = draftState.watchedFolders.map(WatchedFolder::name),
+                    onAddFolder = if (FolderPlaylistSource.isAvailable) {
+                        { launchFolderPicker() }
+                    } else {
+                        null
+                    },
+                    onRemoveFolder = { index ->
+                        if (index in draftState.watchedFolders.indices) {
+                            draftState.watchedFolders.removeAt(index)
+                        }
+                    },
                     showAtmosphereGlassOption =
                         EffectCatalog.supportsAtmosphereGlass(effectId),
                     atmosphereGlassEnabled = draftState.atmosphereGlassEnabled,
@@ -230,6 +276,17 @@ class PlaylistEditorActivity : ComponentActivity() {
                     onDismissCropOptions = { showCropOptions = false }
                 )
 
+                if (showRename) {
+                    RenamePlaylistDialog(
+                        initialName = draftState.playlistName.orEmpty(),
+                        onConfirm = { name ->
+                            showRename = false
+                            draftState.playlistName = name.ifBlank { null }
+                        },
+                        onDismiss = { showRename = false }
+                    )
+                }
+
                 if (showApplyConfirm) {
                     SimpleConfirmDialog(
                         title = "Apply Wallpaper",
@@ -263,6 +320,17 @@ class PlaylistEditorActivity : ComponentActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putInt("EDITING_POS", editingPosition)
+        outState.putString(STATE_SAVED_ID, draftState.savedPlaylistId)
+        outState.putString(STATE_NAME, draftState.playlistName)
+        outState.putStringArrayList(
+            STATE_FOLDER_IDS,
+            ArrayList(draftState.watchedFolders.map(WatchedFolder::id))
+        )
+        outState.putStringArrayList(
+            STATE_FOLDER_NAMES,
+            ArrayList(draftState.watchedFolders.map(WatchedFolder::name))
+        )
+        outState.putLongArray(STATE_KNOWN_IDS, draftState.knownMediaIds.toLongArray())
         outState.putBoolean(
             STATE_ATMOSPHERE_GLASS,
             draftState.atmosphereGlassEnabled
@@ -340,10 +408,31 @@ class PlaylistEditorActivity : ComponentActivity() {
             draftState.atmosphereGlassEnabled
         )
         val bounds = windowManager.currentWindowMetrics.bounds
+        val targetSavedId = draftState.savedPlaylistId
+        val playlistName = draftState.playlistName
+        val folders = draftState.watchedFolders.toList()
+        val knownMediaIds = draftState.knownMediaIds
 
         ioExecutor.execute {
             try {
+                // Everything currently in the folders counts as seen, so
+                // images removed from this draft are not re-added later.
+                val watch = if (folders.isEmpty()) {
+                    FolderWatchState()
+                } else {
+                    FolderWatchState(
+                        folders,
+                        knownMediaIds + FolderPlaylistSource.knownIdsFor(this, folders)
+                    )
+                }
                 WallpaperStorageCoordinator.runExclusive {
+                    // Keep the playlist being replaced; editing the active
+                    // playlist (or its own saved entry) just updates it.
+                    if (!isEditExisting &&
+                        (targetSavedId == null || targetSavedId != SavedPlaylistLibrary.activeId(this))
+                    ) {
+                        SavedPlaylistLibrary.preserveActive(this)
+                    }
                     val fileTransactions = mutableListOf<FileTransactions.ReplacementTransaction>()
                     val appPreferences =
                         getSharedPreferences(APP_PREFERENCES, Context.MODE_PRIVATE)
@@ -392,6 +481,18 @@ class PlaylistEditorActivity : ComponentActivity() {
                         throw failure
                     }
                     cleanupObsoleteThemeData()
+                    ActiveFolderWatch.write(this, watch)
+                    try {
+                        val savedId = SavedPlaylistLibrary.saveActive(
+                            this,
+                            targetSavedId,
+                            playlistName,
+                            watch
+                        )
+                        SavedPlaylistLibrary.setActiveId(this, savedId)
+                    } catch (error: Exception) {
+                        Log.w(TAG, "Playlist applied, but it could not be saved to the library", error)
+                    }
                 }
 
                 runOnUiThread {
@@ -594,9 +695,104 @@ class PlaylistEditorActivity : ComponentActivity() {
         showApplyConfirm = true
     }
 
-    private fun loadExistingPlaylist() {
-        val playlistDir = PlaylistModeManager.standardPlaylistDir(this)
-        val originalsDir = File(filesDir, PlaylistModeManager.STANDARD_ORIGINALS_DIR)
+    private fun restoreLibraryState(savedInstanceState: Bundle?) {
+        savedInstanceState ?: return
+        draftState.savedPlaylistId = savedInstanceState.getString(STATE_SAVED_ID)
+        draftState.playlistName = savedInstanceState.getString(STATE_NAME)
+        val ids = savedInstanceState.getStringArrayList(STATE_FOLDER_IDS).orEmpty()
+        val names = savedInstanceState.getStringArrayList(STATE_FOLDER_NAMES).orEmpty()
+        draftState.watchedFolders.addAll(
+            ids.mapIndexed { index, id -> WatchedFolder(id, names.getOrElse(index) { id }) }
+        )
+        draftState.knownMediaIds =
+            savedInstanceState.getLongArray(STATE_KNOWN_IDS)?.toSet().orEmpty()
+    }
+
+    private fun loadActivePlaylist() {
+        val savedId = SavedPlaylistLibrary.activeId(this)
+        draftState.savedPlaylistId = savedId
+        draftState.playlistName = savedId?.let { SavedPlaylistLibrary.name(this, it) }
+        applyWatchState(ActiveFolderWatch.read(this))
+        loadExistingPlaylist(
+            PlaylistModeManager.standardPlaylistDir(this),
+            File(filesDir, PlaylistModeManager.STANDARD_ORIGINALS_DIR)
+        )
+        addNewFolderImages()
+    }
+
+    private fun loadSavedPlaylist(id: String) {
+        if (!SavedPlaylistLibrary.exists(this, id)) {
+            Toast.makeText(this, "This saved playlist is no longer available.", Toast.LENGTH_LONG)
+                .show()
+            return
+        }
+        draftState.savedPlaylistId = id
+        draftState.playlistName = SavedPlaylistLibrary.name(this, id)
+        applyWatchState(SavedPlaylistLibrary.watchState(this, id))
+        loadExistingPlaylist(
+            SavedPlaylistLibrary.imagesDir(this, id),
+            SavedPlaylistLibrary.originalsDir(this, id)
+        )
+        addNewFolderImages()
+    }
+
+    private fun applyWatchState(state: FolderWatchState) {
+        // A saved folder playlist opened in a build without folder support
+        // keeps its images but stops following the folders.
+        if (!FolderPlaylistSource.isAvailable) return
+        draftState.watchedFolders.clear()
+        draftState.watchedFolders.addAll(state.folders)
+        draftState.knownMediaIds = state.knownMediaIds
+    }
+
+    private fun launchFolderPicker() {
+        pickFolders.launch(
+            Intent(this, FolderPickerActivity::class.java).putStringArrayListExtra(
+                FolderPickerActivity.EXTRA_FOLDER_IDS,
+                ArrayList(draftState.watchedFolders.map(WatchedFolder::id))
+            )
+        )
+    }
+
+    /** Replaces the watched folders and adds images from newly chosen ones. */
+    private fun updateWatchedFolders(folders: List<WatchedFolder>) {
+        draftState.watchedFolders.clear()
+        draftState.watchedFolders.addAll(folders.distinctBy(WatchedFolder::id))
+        addNewFolderImages()
+    }
+
+    /** Appends images in the watched folders that this draft has not seen yet. */
+    private fun addNewFolderImages() {
+        if (!FolderPlaylistSource.isAvailable || draftState.watchedFolders.isEmpty()) return
+        if (!FolderPlaylistSource.hasFullAccess(this)) return
+        val folderIds = draftState.watchedFolders.map(WatchedFolder::id)
+        ioExecutor.execute {
+            val images = runCatching { FolderPlaylistSource.imagesIn(this, folderIds) }
+                .onFailure { error -> Log.w(TAG, "Could not read the watched folders", error) }
+                .getOrDefault(emptyList())
+            runOnUiThread {
+                if (isDestroyed) return@runOnUiThread
+                val fresh = images.filter { it.id !in draftState.knownMediaIds }
+                if (fresh.isEmpty()) return@runOnUiThread
+                draftState.knownMediaIds = draftState.knownMediaIds + fresh.map(MediaImage::id)
+                fresh.forEach { image ->
+                    playlistItems += PlaylistItem(
+                        originalUri = image.uri,
+                        fitMode = defaultFitMode,
+                        fillMode = defaultFillMode
+                    )
+                }
+                Toast.makeText(
+                    this,
+                    if (fresh.size == 1) "1 image added from folders"
+                    else "${fresh.size} images added from folders",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
+
+    private fun loadExistingPlaylist(playlistDir: File, originalsDir: File) {
         val metaFile = File(playlistDir, "metadata.json")
 
         if (!metaFile.isFile) {
@@ -694,19 +890,25 @@ class PlaylistEditorActivity : ComponentActivity() {
         }
     }
 
-    private companion object {
-        const val TAG = "PlaylistEditor"
-        const val APP_PREFERENCES = "app_prefs"
-        const val WALLPAPER_PREFERENCES = "wallpaper_prefs"
-        const val KEY_ROTATION_INTERVAL = "rotation_interval_minutes"
-        const val KEY_LAST_PLAYLIST_IMAGE = "last_playlist_image"
-        const val KEY_LAST_ROTATION = "last_rotation_timestamp"
-        const val STATE_ITEMS = "playlist_items"
-        const val STATE_ATMOSPHERE_GLASS = "playlist_atmosphere_glass"
+    companion object {
+        const val EXTRA_SAVED_PLAYLIST_ID = "SAVED_PLAYLIST_ID"
+        private const val TAG = "PlaylistEditor"
+        private const val APP_PREFERENCES = "app_prefs"
+        private const val WALLPAPER_PREFERENCES = "wallpaper_prefs"
+        private const val KEY_ROTATION_INTERVAL = "rotation_interval_minutes"
+        private const val KEY_LAST_PLAYLIST_IMAGE = "last_playlist_image"
+        private const val KEY_LAST_ROTATION = "last_rotation_timestamp"
+        private const val STATE_ITEMS = "playlist_items"
+        private const val STATE_ATMOSPHERE_GLASS = "playlist_atmosphere_glass"
+        private const val STATE_SAVED_ID = "playlist_saved_id"
+        private const val STATE_NAME = "playlist_name"
+        private const val STATE_FOLDER_IDS = "playlist_folder_ids"
+        private const val STATE_FOLDER_NAMES = "playlist_folder_names"
+        private const val STATE_KNOWN_IDS = "playlist_known_media_ids"
         // Comfortably under the ~1MB shared Binder transaction limit even
         // accounting for per-item overhead (Uri, matrix state, strings).
-        const val MAX_ITEMS_TO_PERSIST_IN_BUNDLE = 300
-        const val ACTION_RELOAD_WALLPAPER =
+        private const val MAX_ITEMS_TO_PERSIST_IN_BUNDLE = 300
+        private const val ACTION_RELOAD_WALLPAPER =
             "com.app.nosatmosphereeffect.RELOAD_WALLPAPER"
     }
 }

@@ -106,6 +106,8 @@ abstract class AnimatedEffectWallpaperService<R : Any> : GLWallpaperService() {
             isKeyguardLocked = ::isKeyguardLocked,
             onUnlock = ::playUnlockAnimation,
             onPrepareForLock = ::prepareForNextUnlock,
+            onShowLocked = ::showLockedState,
+            onResumeHome = ::snapToHomeState,
             onScreenOff = {
                 if (!isPreview) {
                     rotateWallpaper()
@@ -191,7 +193,9 @@ abstract class AnimatedEffectWallpaperService<R : Any> : GLWallpaperService() {
 
             if (!visible) {
                 if (isDeviceInteractive()) {
-                    if (blurDrawerWhenHidden) {
+                    // Skip the drawer blur while an unlock settles: some skins
+                    // briefly hide the wallpaper during fingerprint unlock.
+                    if (blurDrawerWhenHidden && !events.isSettlingAfterUnlock()) {
                         renderer?.let { setDrawerBlurred(it, true) }
                     }
                 } else {
@@ -207,15 +211,7 @@ abstract class AnimatedEffectWallpaperService<R : Any> : GLWallpaperService() {
                 renderer?.let { setDrawerBlurred(it, false) }
             }
 
-            val locked = isKeyguardLocked()
-            events.setLocked(locked)
-            if (locked) {
-                animator?.cancel()
-                renderer?.let { setEffectProgress(it, lockedProgress) }
-                requestRender()
-            } else {
-                snapToHomeState()
-            }
+            events.onVisible(keyguardLocked = isKeyguardLocked())
         }
 
         override fun onWallpaperFlagsChanged(which: Int) {
@@ -357,7 +353,19 @@ abstract class AnimatedEffectWallpaperService<R : Any> : GLWallpaperService() {
             }
         }
 
+        private fun showLockedState() {
+            animator?.cancel()
+            animator = null
+            renderer?.let { setEffectProgress(it, lockedProgress) }
+            requestRender()
+        }
+
         private fun snapToHomeState() {
+            // Let an in-progress unlock animation finish rather than jumping.
+            if (behavior.transitionsEnabled && animator?.isRunning == true) {
+                requestRender()
+                return
+            }
             animator?.cancel()
             animator = null
             renderer?.let { currentRenderer ->

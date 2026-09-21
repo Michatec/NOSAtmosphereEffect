@@ -79,6 +79,10 @@ After selecting an effect, you will be prompted to choose your wallpaper mode:
 
 * **Edit Existing Playlist:** If you already have a standard or theme-based playlist running, this option loads your saved wallpapers (including their exact zoom and crop settings). You can remove images, add new ones, or tweak existing crops without starting over. The playlist editor also allows you to define a default crop setting for newly added images.
 
+* **Saved Playlists:** Every playlist you apply is saved automatically, so switching to a single image or to theme playlists no longer discards it. Open **Saved playlists** to switch back to, rename, or delete any of them. Tap the pencil in the playlist editor to name a playlist.
+
+* **Playlist from Folder (folder build only):** Pick one or more device folders; their images become the playlist, and images you add to those folders later are added automatically the next time you open Atmo Engine. This needs photo access (`READ_MEDIA_IMAGES`), so it ships as a separate `folder` build flavor (`assembleV36FolderRelease`, `assembleV33FolderRelease`, …) instead of the Play Store and F-Droid builds. The app asks for access each time you set up a folder playlist. With Android 14+ **Select photos** access only the chosen images are visible, so new images can't be detected; choose **Allow all** to follow folders.
+
 ### 3\. Application & Activation
 
 Please follow these simple steps to apply the wallpaper:
@@ -188,19 +192,21 @@ This project is built using Kotlin, C++17, the Android NDK, and Gradle. The proj
 
 Atmo Engine keeps one shared codebase and combines two flavor dimensions:
 
-All artifacts in the table below use version name **7.2.0**.
+All artifacts in the table below use version name **7.2.3**.
 
 | Flavor | Minimum Android | Target SDK | Version code | Intended release |
 | --- | ---: |-----------:|-------------:| --- |
-| `v33Play` | Android 13 / API 33 |     API 33 |     `300720` | ML Kit APK |
-| `v33Fdroid` | Android 13 / API 33 |     API 33 |     `300720` | FOSS APK for F-Droid |
-| `v35Play` | Android 15 / API 35 |     API 36 |     `400720` | Google Play ML Kit AAB |
-| `v36Play` | Android 16 / API 36 |     API 36 |     `500720` | ML Kit APK |
-| `v36Fdroid` | Android 16 / API 36 |     API 36 |     `500720` | FOSS APK |
+| `v33Play` | Android 13 / API 33 |     API 33 |     `300723` | ML Kit APK |
+| `v33Fdroid` | Android 13 / API 33 |     API 33 |     `300723` | FOSS APK for F-Droid |
+| `v33Folder` | Android 13 / API 33 |     API 33 |     `300723` | ML Kit APK with folder playlists |
+| `v35Play` | Android 15 / API 35 |     API 36 |     `400723` | Google Play ML Kit AAB |
+| `v36Play` | Android 16 / API 36 |     API 36 |     `500723` | ML Kit APK |
+| `v36Fdroid` | Android 16 / API 36 |     API 36 |     `500723` | FOSS APK |
+| `v36Folder` | Android 16 / API 36 |     API 36 |     `500723` | ML Kit APK with folder playlists |
 
-The `play` source set contains only the ML Kit implementation and explicit model-download controller. The `fdroid` source set contains only [U2NetP](https://github.com/xuebinqin/U-2-Net), its model files, and the source-built FOSS LiteRT runtime. UI, effects, playlists, palette behavior, and settings remain shared in `main`. Model and runtime provenance is recorded in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+The `play` source set contains only the ML Kit implementation and explicit model-download controller. The `fdroid` source set contains only [U2NetP](https://github.com/xuebinqin/U-2-Net), its model files, and the source-built FOSS LiteRT runtime. UI, effects, playlists, palette behavior, and settings remain shared in `main`. The `folder` flavor reuses the `play` source set and additionally declares `READ_MEDIA_IMAGES` and `READ_MEDIA_VISUAL_USER_SELECTED` for folder playlists; the Play Store and F-Droid builds do not request photo access. Model and runtime provenance is recorded in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-Stable and beta release workflows produce exactly five artifacts: Android 16+ ML Kit and FOSS APKs, Android 13+ ML Kit and FOSS APKs, and an Android 15+ ML Kit AAB for Google Play. CI installs the pinned NDK and inspects every archive before signing: the Vulkan library for all four ABIs and every effect's SPIR-V pair must be present, ML Kit artifacts must not contain the [U2NetP model](https://github.com/xuebinqin/U-2-Net) or LiteRT native runtime, both FOSS APKs must contain them, and each ML Kit APK must remain smaller than its matching FOSS APK and below 10 MiB.
+Stable and beta release workflows produce exactly seven artifacts: Android 16+ ML Kit, FOSS, and folder-playlist APKs, Android 13+ ML Kit, FOSS, and folder-playlist APKs, and an Android 15+ ML Kit AAB for Google Play. Only the folder-playlist APKs may declare `READ_MEDIA_IMAGES`; CI fails if any other artifact does. CI installs the pinned NDK and inspects every archive before signing: the Vulkan library for all four ABIs and every effect's SPIR-V pair must be present, ML Kit artifacts must not contain the [U2NetP model](https://github.com/xuebinqin/U-2-Net) or LiteRT native runtime, both FOSS APKs must contain them, and each ML Kit APK must remain smaller than its matching FOSS APK and below 10 MiB.
 
 1.  Clone the repository.
 2.  Open in the latest stable Android Studio.
@@ -213,6 +219,8 @@ Stable and beta release workflows produce exactly five artifacts: Android 16+ ML
 ./gradlew bundleV35PlayRelease
 ./gradlew assembleV36PlayRelease
 ./gradlew assembleV36FdroidRelease
+./gradlew assembleV33FolderRelease
+./gradlew assembleV36FolderRelease
 ```
 
 Release signing keys are intentionally not stored in the repository. Configure your Play upload key locally before uploading either AAB; F-Droid builds and signs its own APK.
@@ -232,7 +240,7 @@ git clone https://github.com/saad-khan-rind/NOSAtmosphereEffect.git
 📧 [khansaad45678900@gmail.com](mailto:khansaad45678900@gmail.com)
 🔗 [LinkedIn](https://www.linkedin.com/in/saadullahkhan456)
 💻 [GitHub](https://github.com/saad-khan-rind)
-📄 [Download Resume](https://drive.google.com/uc?export=download&id=1CyeubsV7WKZeDb6N-XZbwBq42C6JF3Sn)
+📄 [Download Resume](https://drive.google.com/uc?export=download&id=1gVGO5wOwkPiNFu0MeO5kcSgEAEfx3MQS)
 🌐 [Portfolio](https://portfolio-frontend-lovat-nine.vercel.app)
 
 ## License

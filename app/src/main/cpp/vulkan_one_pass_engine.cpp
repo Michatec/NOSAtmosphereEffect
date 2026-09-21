@@ -324,6 +324,16 @@ public:
             logError("ANativeWindow_fromSurface returned null");
             return false;
         }
+        // An abandoned window (its BufferQueue already torn down by the
+        // framework) reports a negative status here. Handing such a window
+        // to vkCreateAndroidSurfaceKHR/vkCreateSwapchainKHR crashes some
+        // drivers instead of returning VK_ERROR_SURFACE_LOST_KHR.
+        if (ANativeWindow_getWidth(window_) <= 0 ||
+            ANativeWindow_getHeight(window_) <= 0) {
+            logError("The wallpaper window was abandoned before Vulkan setup");
+            destroySurface();
+            return false;
+        }
         requestedWidth_ = requestedWidth;
         requestedHeight_ = requestedHeight;
 
@@ -930,10 +940,13 @@ private:
         createInfo.enabledExtensionCount =
             static_cast<uint32_t>(requiredExtensions.size());
         createInfo.ppEnabledExtensionNames = requiredExtensions.data();
-        if (vkCreateInstance(&createInfo, nullptr, &instance_) != VK_SUCCESS) {
+        VkInstance instance = VK_NULL_HANDLE;
+        if (vkCreateInstance(&createInfo, nullptr, &instance) != VK_SUCCESS ||
+            instance == VK_NULL_HANDLE) {
             logError("vkCreateInstance failed");
             return false;
         }
+        instance_ = instance;
         instanceApiVersion_ = requestedApiVersion;
         return true;
     }
@@ -943,15 +956,19 @@ private:
             VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR
         };
         surfaceInfo.window = window_;
-        if (vkCreateAndroidSurfaceKHR(
+        VkSurfaceKHR surface = VK_NULL_HANDLE;
+        if (window_ == nullptr ||
+            vkCreateAndroidSurfaceKHR(
                 instance_,
                 &surfaceInfo,
                 nullptr,
-                &surface_
-            ) != VK_SUCCESS) {
+                &surface
+            ) != VK_SUCCESS ||
+            surface == VK_NULL_HANDLE) {
             logError("vkCreateAndroidSurfaceKHR failed");
             return false;
         }
+        surface_ = surface;
         return true;
     }
 
@@ -1079,15 +1096,17 @@ private:
         deviceInfo.pQueueCreateInfos = &queueInfo;
         deviceInfo.enabledExtensionCount = 1;
         deviceInfo.ppEnabledExtensionNames = &requiredExtension;
+        VkDevice device = VK_NULL_HANDLE;
         if (vkCreateDevice(
                 physicalDevice_,
                 &deviceInfo,
                 nullptr,
-                &device_
-            ) != VK_SUCCESS) {
+                &device
+            ) != VK_SUCCESS || device == VK_NULL_HANDLE) {
             logError("vkCreateDevice failed");
             return false;
         }
+        device_ = device;
         vkGetDeviceQueue(device_, queueFamily_, 0, &queue_);
         return queue_ != VK_NULL_HANDLE;
     }
@@ -1209,15 +1228,17 @@ private:
         swapchainInfo.compositeAlpha = compositeAlpha;
         swapchainInfo.presentMode = VK_PRESENT_MODE_FIFO_KHR;
         swapchainInfo.clipped = VK_TRUE;
+        VkSwapchainKHR swapchain = VK_NULL_HANDLE;
         if (vkCreateSwapchainKHR(
                 device_,
                 &swapchainInfo,
                 nullptr,
-                &swapchain_
-            ) != VK_SUCCESS) {
+                &swapchain
+            ) != VK_SUCCESS || swapchain == VK_NULL_HANDLE) {
             logError("vkCreateSwapchainKHR failed");
             return false;
         }
+        swapchain_ = swapchain;
 
         uint32_t actualImageCount = 0;
         if (vkGetSwapchainImagesKHR(

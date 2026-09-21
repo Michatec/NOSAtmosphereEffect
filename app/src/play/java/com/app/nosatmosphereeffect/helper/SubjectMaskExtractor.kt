@@ -42,6 +42,9 @@ class SubjectMaskExtractor(
     private val moduleClient = ModuleInstall.getClient(context.applicationContext)
 
     @Volatile private var closed = false
+    private val lock = Any()
+    private var inFlight = 0
+    private var segmenterClosed = false
 
     fun extract(bitmap: Bitmap, requestId: Long) {
         if (closed || bitmap.width <= 0 || bitmap.height <= 0) return
@@ -54,31 +57,76 @@ class SubjectMaskExtractor(
             return
         }
 
-        moduleClient.areModulesAvailable(segmenter)
-            .addOnSuccessListener { availability ->
-                when {
-                    closed -> inputBitmap.recycle()
-                    !availability.areModulesAvailable() -> {
-                        SubjectMaskDiagnostics.recordRejection(
-                            "Play services subject model isn't installed yet"
-                        )
-                        inputBitmap.recycle()
-                        onResult(requestId, null)
+        if (!acquire()) {
+            inputBitmap.recycle()
+            return
+        }
+        try {
+            moduleClient.areModulesAvailable(segmenter)
+                .addOnSuccessListener { availability ->
+                    when {
+                        closed -> inputBitmap.recycle()
+                        !availability.areModulesAvailable() -> {
+                            SubjectMaskDiagnostics.recordRejection(
+                                "Play services subject model isn't installed yet"
+                            )
+                            inputBitmap.recycle()
+                            onResult(requestId, null)
+                        }
+                        else -> processInput(inputBitmap, requestId)
                     }
-                    else -> processInput(inputBitmap, requestId)
                 }
+                .addOnFailureListener { error ->
+                    Log.w(TAG, "Could not check subject-segmentation module availability", error)
+                    SubjectMaskDiagnostics.recordFailure("Checking module availability", error)
+                    inputBitmap.recycle()
+                    if (!closed) onResult(requestId, null)
+                }
+                .addOnCompleteListener { release() }
+        } catch (error: Throwable) {
+            Log.w(TAG, "Could not check subject-segmentation module availability", error)
+            SubjectMaskDiagnostics.recordFailure("Checking module availability", error)
+            inputBitmap.recycle()
+            release()
+            if (!closed) onResult(requestId, null)
+        }
+    }
+
+    /**
+     * Keeps the segmenter open while work is in flight. Closing it mid-inference
+     * unmaps the Play services model under the running interpreter (SIGBUS in
+     * dl-MlkitSubjectSegmentation), so close() defers to the last release().
+     */
+    private fun acquire(): Boolean = synchronized(lock) {
+        if (closed || segmenterClosed) return false
+        inFlight++
+        true
+    }
+
+    private fun release() {
+        val closeNow = synchronized(lock) {
+            inFlight = (inFlight - 1).coerceAtLeast(0)
+            closed && inFlight == 0 && !segmenterClosed && run {
+                segmenterClosed = true
+                true
             }
-            .addOnFailureListener { error ->
-                Log.w(TAG, "Could not check subject-segmentation module availability", error)
-                SubjectMaskDiagnostics.recordFailure("Checking module availability", error)
-                inputBitmap.recycle()
-                if (!closed) onResult(requestId, null)
-            }
+        }
+        if (closeNow) closeSegmenter()
+    }
+
+    private fun closeSegmenter() {
+        runCatching { segmenter.close() }
+            .onFailure { error -> Log.w(TAG, "Could not close the subject segmenter", error) }
     }
 
     private fun processInput(inputBitmap: Bitmap, requestId: Long) {
+        if (!acquire()) {
+            inputBitmap.recycle()
+            return
+        }
         if (!SegmentationCrashGuard.beginAttempt(appContext)) {
             inputBitmap.recycle()
+            release()
             if (!closed) onResult(requestId, null)
             return
         }
@@ -205,12 +253,14 @@ class SubjectMaskExtractor(
                 }
                 .addOnCompleteListener {
                     inputBitmap.recycle()
+                    release()
                 }
         } catch (error: Throwable) {
             Log.w(TAG, "Could not start subject segmentation", error)
             SubjectMaskDiagnostics.recordFailure("Starting segmentation", error)
             SegmentationCrashGuard.endAttempt(appContext)
             inputBitmap.recycle()
+            release()
             if (!closed) onResult(requestId, null)
         }
     }
@@ -228,8 +278,14 @@ class SubjectMaskExtractor(
     }
 
     override fun close() {
-        if (closed) return
-        closed = true
-        segmenter.close()
+        val closeNow = synchronized(lock) {
+            if (closed) return
+            closed = true
+            inFlight == 0 && !segmenterClosed && run {
+                segmenterClosed = true
+                true
+            }
+        }
+        if (closeNow) closeSegmenter()
     }
 }

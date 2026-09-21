@@ -13,6 +13,7 @@ import com.app.nosatmosphereeffect.helper.WallpaperRenderHost
 import com.app.nosatmosphereeffect.renderer.ColorFillRenderState
 import com.app.nosatmosphereeffect.renderer.vulkan.common.SwapchainRecreationBudget
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
@@ -268,9 +269,17 @@ internal class VulkanColorFillHost(
 
     override fun onSurfaceDestroyed(holder: SurfaceHolder) {
         clearSurfaceReference()
-        postIfActive {
-            destroySurfaceOnWorker(failRenderer = true)
+        // The surface must be released before this callback returns; the
+        // framework abandons the BufferQueue immediately afterwards.
+        val completed = try {
+            runSynchronouslyIfActive(SURFACE_DESTROY_TIMEOUT_MS) {
+                destroySurfaceOnWorker(failRenderer = true)
+            }
+        } catch (failure: IllegalStateException) {
+            Log.w(TAG, "Unable to release the Color Fill surface", failure)
+            true
         }
+        if (!completed) Log.w(TAG, "Timed out waiting for the Color Fill surface release")
     }
 
     override fun quiesceSurface(holder: SurfaceHolder) {
@@ -668,10 +677,15 @@ internal class VulkanColorFillHost(
     }
 
     private fun runSynchronouslyIfActive(action: () -> Unit) {
-        if (closed.get() || failed.get()) return
+        runSynchronouslyIfActive(timeoutMs = null, action = action)
+    }
+
+    /** Returns false only when [timeoutMs] elapsed before the worker finished. */
+    private fun runSynchronouslyIfActive(timeoutMs: Long?, action: () -> Unit): Boolean {
+        if (closed.get() || failed.get()) return true
         if (Looper.myLooper() == renderThread.looper) {
             action()
-            return
+            return true
         }
 
         val completion = CountDownLatch(1)
@@ -697,9 +711,18 @@ internal class VulkanColorFillHost(
         }
 
         var interrupted = false
+        val deadline = timeoutMs?.let { System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(it) }
+        var completed = false
         while (true) {
             try {
-                completion.await()
+                if (deadline == null) {
+                    completion.await()
+                    completed = true
+                } else {
+                    val remaining = deadline - System.nanoTime()
+                    completed = remaining > 0 &&
+                        completion.await(remaining, TimeUnit.NANOSECONDS)
+                }
                 break
             } catch (_: InterruptedException) {
                 interrupted = true
@@ -712,6 +735,7 @@ internal class VulkanColorFillHost(
                 workerFailure
             )
         }
+        return completed
     }
 
     private fun postIfActive(action: () -> Unit) {
@@ -857,5 +881,6 @@ internal class VulkanColorFillHost(
         const val RENDER_FATAL = -1
         const val MAX_SWAPCHAIN_RETRIES = 2
         const val NO_SURFACE_GENERATION = -1L
+        const val SURFACE_DESTROY_TIMEOUT_MS = 3_000L
     }
 }

@@ -10,6 +10,8 @@ import android.util.Log
 import com.app.nosatmosphereeffect.helper.ImageFitMode
 import com.app.nosatmosphereeffect.helper.ImageFitPolicy
 import com.app.nosatmosphereeffect.helper.MatrixStatePolicy
+import com.app.nosatmosphereeffect.helper.PlaylistFilePolicy
+import com.app.nosatmosphereeffect.helper.PlaylistModeManager
 import com.app.nosatmosphereeffect.helper.WallpaperFitHelper
 import com.app.nosatmosphereeffect.image.BitmapDecoder
 import com.app.nosatmosphereeffect.image.BitmapStore
@@ -158,6 +160,75 @@ internal object PlaylistCollectionStore {
                 }
             }
         }
+    }
+
+    /**
+     * Appends [items] to an existing playlist in place, continuing its
+     * `wallpaper_N.jpg` numbering and `metadata.json`. Returns how many images
+     * were added; an item that cannot be read is skipped, not fatal.
+     * Run inside [WallpaperStorageCoordinator.runExclusive].
+     */
+    @Throws(IOException::class)
+    fun append(
+        context: Context,
+        items: List<PlaylistImageSource>,
+        playlistDirectory: File,
+        originalsDirectory: File,
+        targetWidth: Int,
+        targetHeight: Int
+    ): Int {
+        if (items.isEmpty()) return 0
+        if (targetWidth <= 0 || targetHeight <= 0) {
+            throw IOException("Display dimensions are unavailable")
+        }
+        val existing = PlaylistModeManager.imageFiles(playlistDirectory)
+        if (existing.isEmpty()) throw IOException("There is no playlist to extend")
+
+        val metadataFile = File(playlistDirectory, "metadata.json")
+        val metadata = if (metadataFile.isFile) JSONArray(metadataFile.readText()) else null
+        // metadata[i] describes wallpaper_i, so only append when they line up.
+        val nextIndex = (existing.mapNotNull { PlaylistFilePolicy.index(it.name) }.max() + 1)
+            .let { if (metadata != null && metadata.length() != it) null else it }
+            ?: throw IOException("Playlist metadata does not match its images")
+
+        var index = nextIndex
+        items.forEach { item ->
+            val wallpaper = File(playlistDirectory, "wallpaper_$index.jpg")
+            val original = File(originalsDirectory, "original_$index.jpg")
+            try {
+                UriFiles.copyAtomically(context, item.originalUri, original)
+                val source = BitmapDecoder.decodeUri(
+                    context,
+                    item.originalUri,
+                    targetWidth,
+                    targetHeight
+                )
+                val bitmap = WallpaperFitHelper.fitBitmap(
+                    source,
+                    targetWidth,
+                    targetHeight,
+                    item.fitMode,
+                    item.fillMode
+                )
+                try {
+                    BitmapStore.writeJpegAtomically(bitmap, wallpaper, quality = STAGED_JPEG_QUALITY)
+                } finally {
+                    bitmap.recycle()
+                }
+            } catch (error: Exception) {
+                // One unreadable or deleted image must not block the others.
+                Log.w(TAG, "Skipping ${item.originalUri} while extending the playlist", error)
+                FileTransactions.deleteRecursively(original)
+                FileTransactions.deleteRecursively(wallpaper)
+                return@forEach
+            }
+            metadata?.put(metadataFor(index, item))
+            index++
+        }
+        if (metadata != null && index != nextIndex) {
+            FileTransactions.writeTextAtomically(metadataFile, metadata.toString())
+        }
+        return index - nextIndex
     }
 
     private fun metadataFor(index: Int, item: PlaylistImageSource): JSONObject {
