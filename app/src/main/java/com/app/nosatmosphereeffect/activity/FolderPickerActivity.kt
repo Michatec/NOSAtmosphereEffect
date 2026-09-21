@@ -1,9 +1,11 @@
 package com.app.nosatmosphereeffect.activity
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -37,6 +39,7 @@ class FolderPickerActivity : ComponentActivity() {
     private var canAskAgain by mutableStateOf(true)
     private var folders by mutableStateOf<List<MediaFolder>?>(null)
     private var selectedIds by mutableStateOf<Set<String>>(emptySet())
+    private var requestStartedAt = 0L
 
     private val requestAccess =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -98,7 +101,8 @@ class FolderPickerActivity : ComponentActivity() {
 
     private fun askForAccess() {
         access = FolderAccessState.CHECKING
-        requestAccess.launch(FolderPlaylistSource.requestedPermissions())
+        requestStartedAt = SystemClock.uptimeMillis()
+        requestAccess.launch(FolderPlaylistSource.requestedPermissions(this))
     }
 
     private fun refreshAccess(afterRequest: Boolean) {
@@ -108,10 +112,13 @@ class FolderPickerActivity : ComponentActivity() {
             else -> FolderAccessState.DENIED
         }
         if (afterRequest && access != FolderAccessState.GRANTED) {
-            // After a denial the system stops showing its dialog unless a
-            // rationale is still allowed; then only app settings can help.
-            canAskAgain = FolderPlaylistSource.requestedPermissions().any(::shouldShowRequestPermissionRationale) ||
-                access == FolderAccessState.PARTIAL
+            // Once the user has refused often enough, Android answers
+            // instantly without showing any dialog. Only offer "Allow access"
+            // while a dialog can still appear; app settings always works.
+            val answeredWithoutDialog =
+                SystemClock.uptimeMillis() - requestStartedAt < NO_DIALOG_THRESHOLD_MS
+            canAskAgain = !answeredWithoutDialog ||
+                shouldShowRequestPermissionRationale(Manifest.permission.READ_MEDIA_IMAGES)
         }
         if (access == FolderAccessState.GRANTED && folders == null) loadFolders()
     }
@@ -160,6 +167,7 @@ class FolderPickerActivity : ComponentActivity() {
     companion object {
         private const val TAG = "FolderPicker"
         private const val STATE_SELECTED = "selected_folders"
+        private const val NO_DIALOG_THRESHOLD_MS = 350L
         const val EXTRA_FOLDER_IDS = "FOLDER_IDS"
         const val EXTRA_FOLDER_NAMES = "FOLDER_NAMES"
 
