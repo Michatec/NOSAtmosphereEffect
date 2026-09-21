@@ -26,7 +26,8 @@ internal object PlaylistRotationPolicy {
         playlistSize: Int,
         intervalMinutes: Long,
         lastRotationMillis: Long,
-        nowMillis: Long
+        nowMillis: Long,
+        forceRotate: Boolean = false
     ): RotationDecision {
         require(
             mode == PlaylistModeManager.MODE_SINGLE ||
@@ -53,6 +54,11 @@ internal object PlaylistRotationPolicy {
         }
         if (playlistSize == 0) {
             return skipped(RotationSkipReason.EMPTY_PLAYLIST, themeChanged)
+        }
+        // The displayed image left the playlist (deleted from a followed
+        // folder): replace it now, even with one image left or mid-interval.
+        if (forceRotate && !isThemeChange) {
+            return RotationDecision(shouldRotate = true, themeChanged = themeChanged)
         }
         if (!themeChanged && playlistSize == 1) {
             return skipped(RotationSkipReason.ONLY_PLAYLIST_ITEM)

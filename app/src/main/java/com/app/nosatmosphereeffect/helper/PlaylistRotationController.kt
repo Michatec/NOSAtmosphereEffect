@@ -61,6 +61,19 @@ object PlaylistRotationController {
         if (mode == PlaylistModeManager.MODE_SINGLE) return
         if (isThemeChange && mode != PlaylistModeManager.MODE_THEME) return
 
+        // Folder playlists follow their folders even while the app is closed.
+        if (!isThemeChange && mode == PlaylistModeManager.MODE_STANDARD &&
+            FolderPlaylistSource.isAvailable
+        ) {
+            try {
+                FolderPlaylistSource.syncActivePlaylist(context)
+            } catch (error: Exception) {
+                Log.w(TAG, "Could not sync the followed folders", error)
+            }
+        }
+        val forceRotate = mode == PlaylistModeManager.MODE_STANDARD &&
+            FolderPlaylistSource.isRotationForced(context)
+
         val prefs = context.getSharedPreferences("wallpaper_prefs", Context.MODE_PRIVATE)
         val isNightMode = if (isThemeChange) currentNightMode
             else PlaylistModeManager.currentNightMode(context)
@@ -76,7 +89,8 @@ object PlaylistRotationController {
             playlistSize = playlistFiles.size,
             intervalMinutes = prefs.getLong("rotation_interval_minutes", 0L),
             lastRotationMillis = prefs.getLong("last_rotation_timestamp", 0L),
-            nowMillis = nowMillis
+            nowMillis = nowMillis,
+            forceRotate = forceRotate
         )
         if (!decision.shouldRotate) return
 
@@ -98,6 +112,7 @@ object PlaylistRotationController {
         if (!editor.commit()) {
             Log.w(TAG, "Rotated wallpaper, but could not persist the playlist position")
         }
+        if (forceRotate) FolderPlaylistSource.clearForcedRotation(context)
         requestRender()
         notifyColorsChanged()
     }

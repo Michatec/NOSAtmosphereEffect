@@ -20,7 +20,9 @@ internal data class PlaylistDraftItem(
     val editedFilePath: String? = null,
     val matrixState: FloatArray? = null,
     val fitMode: String = WallpaperFitHelper.MODE_FILL,
-    val fillMode: String = WallpaperFitHelper.FILL_BLACK
+    val fillMode: String = WallpaperFitHelper.FILL_BLACK,
+    /** MediaStore id when the image came from a followed folder. */
+    val mediaId: Long? = null
 )
 
 internal class StandardPlaylistDraftState : ViewModel() {
@@ -63,6 +65,7 @@ internal object PlaylistDraftStateCodec {
                     putFloatArray(KEY_MATRIX, MatrixStatePolicy.copyIfValid(item.matrixState))
                     putString(KEY_FIT_MODE, item.fitMode)
                     putString(KEY_FILL_MODE, item.fillMode)
+                    item.mediaId?.let { putLong(KEY_MEDIA_ID, it) }
                 }
             }
         )
@@ -82,7 +85,8 @@ internal object PlaylistDraftStateCodec {
                 fitMode = state.getString(KEY_FIT_MODE)
                     ?: WallpaperFitHelper.MODE_FILL,
                 fillMode = state.getString(KEY_FILL_MODE)
-                    ?: WallpaperFitHelper.FILL_BLACK
+                    ?: WallpaperFitHelper.FILL_BLACK,
+                mediaId = if (state.containsKey(KEY_MEDIA_ID)) state.getLong(KEY_MEDIA_ID) else null
             )
         }
     }
@@ -93,6 +97,7 @@ internal object PlaylistDraftStateCodec {
     private const val KEY_MATRIX = "matrix"
     private const val KEY_FIT_MODE = "fit_mode"
     private const val KEY_FILL_MODE = "fill_mode"
+    private const val KEY_MEDIA_ID = "media_id"
 }
 
 internal object PlaylistDraftCache {
