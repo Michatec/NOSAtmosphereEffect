@@ -78,7 +78,6 @@ data class AdvancedConfig(
     val showClockToggle: Boolean,
     val clockEnabled: Boolean,
     val clockDepthEnabled: Boolean,
-    val clockAdaptiveEnabled: Boolean,
     /**
      * Whether the lock/home/both choice is offered. True only for effects that
      * leave the photo's geometry intact at both ends of their transition —
@@ -144,7 +143,6 @@ data class AdvancedResult(
     val atmosphereGlassEnabled: Boolean,
     val clockEnabled: Boolean,
     val clockDepthEnabled: Boolean,
-    val clockAdaptiveEnabled: Boolean,
     val clockScreenId: String,
     val glassLineCount: Int,
     val glassLineThickness: Float,
@@ -195,9 +193,6 @@ fun AdvancedSettingsScreen(
     }
     var clockEnabled by remember {
         mutableStateOf(config.clockEnabled)
-    }
-    var clockAdaptiveEnabled by remember {
-        mutableStateOf(config.clockAdaptiveEnabled)
     }
     var clockDepthEnabled by remember {
         mutableStateOf(config.clockDepthEnabled)
@@ -288,7 +283,6 @@ fun AdvancedSettingsScreen(
         atmosphereGlassEnabled = atmosphereGlassEnabled,
         clockEnabled = clockEnabled,
         clockDepthEnabled = clockDepthEnabled,
-        clockAdaptiveEnabled = clockAdaptiveEnabled,
         clockScreenId = clockScreenId,
         glassLineCount = GlassEffectPolicy.sanitizeLineCount(glassLineCount),
         glassLineThickness = GlassEffectPolicy.sanitizeLineThickness(glassLineThickness),
@@ -393,8 +387,6 @@ fun AdvancedSettingsScreen(
                         onClockEnabledChange = { clockEnabled = it },
                         clockDepthEnabled = clockDepthEnabled,
                         onClockDepthEnabledChange = { clockDepthEnabled = it },
-                        clockAdaptiveEnabled = clockAdaptiveEnabled,
-                        onClockAdaptiveEnabledChange = { clockAdaptiveEnabled = it },
                         clockScreenId = clockScreenId,
                         onClockScreenIdChange = { clockScreenId = it },
                         glassLineCount = glassLineCount,
@@ -496,8 +488,6 @@ private fun EffectSettings(
     onClockEnabledChange: (Boolean) -> Unit,
     clockDepthEnabled: Boolean,
     onClockDepthEnabledChange: (Boolean) -> Unit,
-    clockAdaptiveEnabled: Boolean,
-    onClockAdaptiveEnabledChange: (Boolean) -> Unit,
     clockScreenId: String,
     onClockScreenIdChange: (String) -> Unit,
     glassLineCount: Float,
@@ -689,15 +679,6 @@ private fun EffectSettings(
                             "the clock sits behind them. Needs a photo with a " +
                             "clear subject."
                     )
-                    SettingSwitchRow(
-                        title = "Adaptive size",
-                        checked = clockAdaptiveEnabled,
-                        onCheckedChange = onClockAdaptiveEnabledChange,
-                        subtitle = "Shrinks the clock so it stays clear of the " +
-                            "subject. If it can't fit, it keeps its size and " +
-                            "sits behind them."
-                    )
-                    Spacer(Modifier.height(8.dp))
                     val context = LocalContext.current
                     AtmoTextButton(
                         text = "Choose style, position & size",

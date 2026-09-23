@@ -58,14 +58,6 @@ object AtmosphereClockPolicy {
      * collapses it onto the one side that works.
      */
     const val SCREEN_KEY = "atmosphere_clock_screen"
-    /**
-     * Adaptive size: the clock shrinks, top edge fixed, until it no longer
-     * overlaps the photo's subject — the way One UI's lock-screen clock makes
-     * room for a face. Needs the same subject mask as the depth effect; when
-     * even the smallest size would still overlap, the clock keeps its full
-     * size and depth (if on) puts it behind the subject instead.
-     */
-    const val ADAPTIVE_KEY = "atmosphere_clock_adaptive"
 
     const val DEFAULT_CENTER_X = 0.5f
     const val DEFAULT_TOP = 0.13f
@@ -86,9 +78,6 @@ object AtmosphereClockPolicy {
     const val MAX_AXIS_SCALE = 2.6f
     const val DEFAULT_OPACITY = 1f
     const val DEFAULT_DEPTH = true
-    const val DEFAULT_ADAPTIVE = true
-    /** Smallest adaptive size, as a fraction of the size the user chose. */
-    const val MIN_ADAPTIVE_SCALE = 0.42f
     const val DEFAULT_SECONDS = false
     const val DEFAULT_ANIMATE = true
     const val DEFAULT_COLOR = ClockPalette.AUTO
@@ -108,7 +97,6 @@ object AtmosphereClockPolicy {
     val ALL_KEYS: List<String> = listOf(
         ENABLED_KEY,
         DEPTH_KEY,
-        ADAPTIVE_KEY,
         STYLE_KEY,
         SECONDS_KEY,
         ANIMATE_KEY,

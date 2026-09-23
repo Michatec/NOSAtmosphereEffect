@@ -199,20 +199,6 @@ class ClockFaceRenderer(private val context: Context) {
             }
         }
 
-    /**
-     * Where the digits may reach before they would touch the photo's subject,
-     * or null for "nowhere in the way". Changing it only needs a redraw: the
-     * bitmap keeps its size, and only the vertical size of individual digits
-     * inside it changes.
-     */
-    var digitFit: ClockDigitFit? = null
-        set(value) {
-            if (field != value) {
-                field = value
-                invalidate()
-            }
-        }
-
     var animateDigits: Boolean = true
         set(value) {
             if (field != value) {
@@ -449,7 +435,6 @@ class ClockFaceRenderer(private val context: Context) {
     // ---------------------------------------------------------------- draw
 
     private fun drawFace(target: Canvas, face: FaceLayout, uptimeMs: Long) {
-        val fits = adaptiveFits(face)
         val progress = transitionProgress(uptimeMs)
         val entry = entryProgress(uptimeMs)
         val rowCount = face.rows.size
@@ -467,7 +452,6 @@ class ClockFaceRenderer(private val context: Context) {
 
             for (slotIndex in row.slots.indices) {
                 val slot = row.slots[slotIndex]
-                val fit = fits?.getOrNull(rowIndex)?.getOrNull(slotIndex) ?: NO_FIT
                 val newChar = currentRow.getOrNull(slotIndex)
                 if (newChar == null) {
                     x += slot.advance
@@ -499,8 +483,7 @@ class ClockFaceRenderer(private val context: Context) {
                         alpha = 1f,
                         offsetY = 0f,
                         scale = 1f,
-                        entry = entrySlot,
-                        fit = fit
+                        entry = entrySlot
                     )
                 } else {
                     val eased = easeOutCubic(slotProgress)
@@ -517,8 +500,7 @@ class ClockFaceRenderer(private val context: Context) {
                         alpha = 1f - eased,
                         offsetY = -shift * eased,
                         scale = 1f - 0.10f * eased,
-                        entry = entrySlot,
-                        fit = fit
+                        entry = entrySlot
                     )
                     drawGlyph(
                         target = target,
@@ -529,8 +511,7 @@ class ClockFaceRenderer(private val context: Context) {
                         alpha = eased,
                         offsetY = shift * (1f - eased),
                         scale = 0.90f + 0.10f * eased,
-                        entry = entrySlot,
-                        fit = fit
+                        entry = entrySlot
                     )
                 }
                 x += slot.advance
@@ -554,8 +535,7 @@ class ClockFaceRenderer(private val context: Context) {
         alpha: Float,
         offsetY: Float,
         scale: Float,
-        entry: Float?,
-        fit: SlotFit = NO_FIT
+        entry: Float?
     ) {
         // Alpha leads the motion slightly: a glyph that is still travelling
         // but already solid reads as arriving, where one that fades in on the
@@ -606,13 +586,6 @@ class ClockFaceRenderer(private val context: Context) {
         // two nested ones.
         val scaleY = scale * entryScale * face.verticalStretch
         target.save()
-        // The adaptive fit sizes this digit on its own, about the top edge of
-        // its row: a digit that has to make room for a subject gets shorter
-        // downwards while its top stays where the user placed the clock.
-        if (fit.scaleY != 1f || fit.shiftY != 0f) {
-            target.translate(0f, fit.shiftY)
-            target.scale(1f, fit.scaleY, centerX, fit.pivotY)
-        }
         target.translate(0f, offsetY + entryRise)
         target.scale(scaleX, scaleY, centerX, baseline)
         target.drawText(text, centerX - glyphWidth / 2f, baseline, textPaint)
@@ -878,104 +851,6 @@ class ClockFaceRenderer(private val context: Context) {
         return 1f + (BACK_OVERSHOOT + 1f) * t.pow(3) + BACK_OVERSHOOT * t.pow(2)
     }
 
-    /**
-     * One digit's adaptive sizing: [scaleY] about [pivotY] (the top edge of
-     * its row), after moving down by [shiftY] to sit under whatever the rows
-     * above it ended up occupying.
-     */
-    private data class SlotFit(
-        val scaleY: Float = 1f,
-        val pivotY: Float = 0f,
-        val shiftY: Float = 0f
-    )
-
-    /**
-     * Sizes every digit against the subject.
-     *
-     * Each digit is measured over its own strip of the face, so a digit over
-     * empty sky keeps its full height while the one over a head is shortened.
-     *
-     * Stacked faces size a whole column at once, because their two rows share
-     * the vertical space: the bottom row absorbs most of the space that has to
-     * be given up and the rows above it share the rest (see
-     * [ClockAdaptiveLayout.stackedDigitScales]), so a
-     * subject rising into the clock mostly shortens the digit nearest to it
-     * and only slightly shortens the one above. The rows are then re-stacked
-     * under each other.
-     */
-    private fun adaptiveFits(face: FaceLayout): Array<Array<SlotFit>>? {
-        val fit = digitFit ?: return null
-        val bitmapWidth = face.contentWidth + face.paddingX * 2f
-        val bitmapHeight = face.contentHeight + face.paddingY * 2f
-        if (bitmapWidth <= 0f || bitmapHeight <= 0f || face.rowHeight <= 0f) return null
-
-        val rowStep = face.rowHeight + face.rowSpacing
-        val result = Array(face.rows.size) { rowIndex ->
-            Array(face.rows[rowIndex].slots.size) { NO_FIT }
-        }
-
-        if (!style.stacked) {
-            face.rows.forEachIndexed { rowIndex, row ->
-                val top = face.paddingY + rowStep * rowIndex
-                var x = face.paddingX + (face.contentWidth - row.width) / 2f
-                row.slots.forEachIndexed { slotIndex, slot ->
-                    val limit = fit.limitFor(x / bitmapWidth, (x + slot.advance) / bitmapWidth)
-                    result[rowIndex][slotIndex] = SlotFit(
-                        scaleY = ClockAdaptiveLayout.digitScale(
-                            available = limit * bitmapHeight - top,
-                            natural = face.rowHeight
-                        ),
-                        pivotY = top
-                    )
-                    x += slot.advance
-                }
-            }
-            return result
-        }
-
-        val columns = face.rows.maxOf { it.slots.size }
-        val top0 = face.paddingY
-        for (column in 0 until columns) {
-            // The rows are centred on each other, so a column's strip is the
-            // union of that slot's span in every row that has one.
-            var left = Float.MAX_VALUE
-            var right = -Float.MAX_VALUE
-            face.rows.forEach { row ->
-                if (column >= row.slots.size) return@forEach
-                var x = face.paddingX + (face.contentWidth - row.width) / 2f
-                for (index in 0 until column) x += row.slots[index].advance
-                left = minOf(left, x)
-                right = maxOf(right, x + row.slots[column].advance)
-            }
-            if (right < left) continue
-
-            val limit = fit.limitFor(left / bitmapWidth, right / bitmapWidth)
-            val rowCount = face.rows.count { column < it.slots.size }
-            val scales = ClockAdaptiveLayout.stackedDigitScales(
-                rowCount = rowCount,
-                rowHeight = face.rowHeight,
-                rowSpacing = face.rowSpacing,
-                available = limit * bitmapHeight - top0
-            )
-
-            var cursor = top0
-            var placed = 0
-            face.rows.forEachIndexed { rowIndex, row ->
-                if (column >= row.slots.size) return@forEachIndexed
-                val scale = scales[placed]
-                val layoutTop = face.paddingY + rowStep * rowIndex
-                result[rowIndex][column] = SlotFit(
-                    scaleY = scale,
-                    pivotY = layoutTop,
-                    shiftY = cursor - layoutTop
-                )
-                cursor += face.rowHeight * scale + face.rowSpacing
-                placed++
-            }
-        }
-        return result
-    }
-
     private data class Slot(val advance: Float)
 
     private data class RowLayout(val slots: List<Slot>, val width: Float)
@@ -1050,7 +925,6 @@ class ClockFaceRenderer(private val context: Context) {
 
         const val NO_TRANSITION = Long.MIN_VALUE
         const val DIGITS_SAMPLE = "0123456789"
-        val NO_FIT = SlotFit()
     }
 }
 

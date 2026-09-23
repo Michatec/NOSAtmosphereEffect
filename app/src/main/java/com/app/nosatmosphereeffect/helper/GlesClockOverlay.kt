@@ -125,7 +125,6 @@ class GlesClockOverlay(
             provider.animateEntry = next.animate
             provider.color = next.color
             provider.hourFormatOverride = next.hourFormatOverride
-            provider.digitFit = next.digitFit
         }
         if (pendingFormatRefresh) {
             pendingFormatRefresh = false

@@ -5,8 +5,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -65,36 +64,57 @@ internal fun ClockBoxOverlay(
 ) {
     val density = LocalDensity.current
     val touchSlopPx = with(density) { HANDLE_TOUCH_DP.dp.toPx() }
-    var handle by remember { mutableStateOf(ClockBoxHandle.MOVE) }
+    val handleRadiusPx = with(density) { HANDLE_RADIUS_DP.dp.toPx() }
+    // The gesture detector is installed once and reads everything it needs
+    // through these. Keying pointerInput on the box restarted the detector on
+    // every movement, so each swipe produced one small step and then had to
+    // clear the touch slop all over again.
+    val currentBox by rememberUpdatedState(box)
+    val boxChanged by rememberUpdatedState(onBoxChange)
+    val dragStarted by rememberUpdatedState(onDragStarted)
+    val dragFinished by rememberUpdatedState(onDragFinished)
+    val tapped by rememberUpdatedState(onTap)
 
     androidx.compose.foundation.Canvas(
         modifier = modifier
             .fillMaxSize()
             .pointerInput(Unit) {
-                detectTapGestures { onTap(it) }
+                detectTapGestures { tapped(it) }
             }
-            .pointerInput(box, touchSlopPx) {
+            .pointerInput(Unit) {
+                var handle = ClockBoxHandle.MOVE
+                var startBox = Rect.Zero
+                var travelled = Offset.Zero
                 detectDragGestures(
                     onDragStart = { position ->
-                        handle = handleAt(position, box, size.width.toFloat(), size.height.toFloat(), touchSlopPx)
-                        onDragStarted()
+                        val width = size.width.toFloat()
+                        val height = size.height.toFloat()
+                        startBox = currentBox
+                        travelled = Offset.Zero
+                        handle = handleAt(position, startBox, width, height, touchSlopPx)
+                        dragStarted()
                     },
-                    onDragEnd = { onDragFinished() },
-                    onDragCancel = { onDragFinished() }
+                    onDragEnd = { dragFinished() },
+                    onDragCancel = { dragFinished() }
                 ) { change, drag ->
                     change.consume()
                     val width = size.width.toFloat()
                     val height = size.height.toFloat()
                     if (width <= 0f || height <= 0f) return@detectDragGestures
-                    onBoxChange(
-                        box.movedBy(handle, drag.x / width, drag.y / height),
+                    // Applied to where the box was when the finger went down,
+                    // not to wherever it is now: pointer events arrive faster
+                    // than recomposition, and chaining deltas onto a box that
+                    // has not caught up yet drops movement.
+                    travelled += drag
+                    boxChanged(
+                        startBox.movedBy(handle, travelled.x / width, travelled.y / height),
                         handle
                     )
                 }
             }
     ) {
-        drawCentreGuide(box, centered)
-        drawBox(box, showHandles, with(density) { HANDLE_RADIUS_DP.dp.toPx() })
+        drawCentreGuide(currentBox, centered)
+        drawBox(currentBox, showHandles, handleRadiusPx)
     }
 }
 

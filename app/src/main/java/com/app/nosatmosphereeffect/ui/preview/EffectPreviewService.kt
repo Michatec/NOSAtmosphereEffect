@@ -62,17 +62,6 @@ class EffectPreviewService(
     private val forceOpenGlEs: Boolean = false
 ) {
     private val appContext = context.applicationContext
-
-    /** Shows the adaptive clock size here too; re-fits once the profile is known. */
-    private val clockAdaptiveWorker = java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "AtmoPreviewClockLayout").apply { isDaemon = true }
-    }
-    private val clockAdaptive = com.app.nosatmosphereeffect.helper.ClockAdaptiveResolver(
-        appContext,
-        clockAdaptiveWorker
-    ) {
-        android.os.Handler(android.os.Looper.getMainLooper()).post { updateClock { it } }
-    }
     private val released = AtomicBoolean(false)
     private val sourceLock = Any()
     private val sourceBitmap = source?.copy(Bitmap.Config.ARGB_8888, false)
@@ -88,15 +77,7 @@ class EffectPreviewService(
     }
     private var configuredAtmosphereGlassEnabled = false
     private var configuredAtmosphereGlassBackgroundOnly = false
-    private val renderState = AtomicReference(
-        createInitialState().let { initial ->
-            val clock = EffectPreviewStatePolicy.clockOf(initial)
-            EffectPreviewStatePolicy.withClock(
-                initial,
-                clock.copy(digitFit = clockAdaptive.fitFor(clock))
-            )
-        }
-    )
+    private val renderState = AtomicReference(createInitialState())
     private val previewContainer = PreviewContainerView(context, cornerRadiusPx)
 
     private var activeBackend = GraphicsBackend.OPENGL_ES
@@ -235,10 +216,9 @@ class EffectPreviewService(
     ) {
         if (released.get()) return
         val snapshot = renderState.updateAndGet { state ->
-            val next = transform(EffectPreviewStatePolicy.clockOf(state))
             EffectPreviewStatePolicy.withClock(
                 state,
-                next.copy(digitFit = clockAdaptive.fitFor(next))
+                transform(EffectPreviewStatePolicy.clockOf(state))
             )
         }
         when (activeBackend) {
@@ -340,8 +320,6 @@ class EffectPreviewService(
 
     fun release() {
         if (!released.compareAndSet(false, true)) return
-        clockAdaptive.close()
-        clockAdaptiveWorker.shutdownNow()
         val wasResumed = resumed
         resumed = false
         vulkanSession?.close()
@@ -376,8 +354,7 @@ class EffectPreviewService(
             color = ClockPalette.resolve(
                 clock.requestedColor,
                 ClockPalette.autoColorFor(appContext)
-            ),
-            digitFit = clockAdaptive.fitFor(clock)
+            )
         ).sanitized()
     }
 
@@ -417,11 +394,6 @@ class EffectPreviewService(
                             prefs,
                             AtmosphereClockPolicy.DEPTH_KEY,
                             AtmosphereClockPolicy.DEFAULT_DEPTH
-                        ),
-                        clockAdaptive = previewBoolean(
-                            prefs,
-                            AtmosphereClockPolicy.ADAPTIVE_KEY,
-                            AtmosphereClockPolicy.DEFAULT_ADAPTIVE
                         ),
                         clockStyleId = previewString(
                             prefs,

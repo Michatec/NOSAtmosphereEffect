@@ -56,10 +56,6 @@ object ClockPreferences {
                     AtmosphereClockPolicy.DEPTH_KEY,
                     AtmosphereClockPolicy.DEFAULT_DEPTH
                 ),
-            adaptive = preferences.readBoolean(
-                AtmosphereClockPolicy.ADAPTIVE_KEY,
-                AtmosphereClockPolicy.DEFAULT_ADAPTIVE
-            ),
             styleId = preferences.readString(
                 AtmosphereClockPolicy.STYLE_KEY,
                 ClockStyle.DEFAULT.id

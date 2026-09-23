@@ -77,12 +77,7 @@ Two faces, both made of glass: the wallpaper shows through the digits, bent at t
 * **Glass:** hours and minutes side by side.
 * **Glass Stacked:** hours above minutes, which goes much larger on a phone.
 
-Two switches control how the clock reacts to the photo:
-
-* **Depth effect:** Draws the photo's subject back over the clock, so the clock sits behind them.
-* **Adaptive size:** Like the One UI lock-screen clock, the clock keeps the position and size you chose and each digit sizes itself: a digit over empty sky stays full height, while one whose column runs into the subject is shortened just enough to clear it. On the stacked face a column's bottom digit gives up most of the height and the digit above it only eases off a little. Digits never shrink past a readable floor — if the subject reaches that far the depth effect puts the clock behind it instead. The subject is analysed once per wallpaper, on the device, and the result is cached.
-
-Depth and adaptive size use the same on-device subject model as subject isolation (see above).
+* **Depth effect:** Draws the photo's subject back over the clock, so the clock sits behind them, using the same on-device subject model as subject isolation (see above).
 
 ### 2\. Select Image & Playlist Mode
 After selecting an effect, you will be prompted to choose your wallpaper mode:

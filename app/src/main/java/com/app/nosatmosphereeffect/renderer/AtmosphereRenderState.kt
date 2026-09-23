@@ -1,7 +1,6 @@
 package com.app.nosatmosphereeffect.renderer
 
 import com.app.nosatmosphereeffect.helper.AtmosphereClockPolicy
-import com.app.nosatmosphereeffect.helper.ClockDigitFit
 import com.app.nosatmosphereeffect.helper.ClockOverlayState
 import com.app.nosatmosphereeffect.helper.ClockPalette
 import com.app.nosatmosphereeffect.helper.ClockScreen
@@ -72,9 +71,6 @@ data class AtmosphereRenderState(
      * both request a subject mask, but either can ask for one on its own.
      */
     val clockDepthEnabled: Boolean = AtmosphereClockPolicy.DEFAULT_DEPTH,
-    val clockAdaptive: Boolean = AtmosphereClockPolicy.DEFAULT_ADAPTIVE,
-    /** Derived per wallpaper — see ClockOverlayState.digitFit. */
-    val clockDigitFit: ClockDigitFit? = null,
     val clockStyleId: String = ClockStyle.DEFAULT.id,
     val clockShowSeconds: Boolean = AtmosphereClockPolicy.DEFAULT_SECONDS,
     val clockAnimate: Boolean = AtmosphereClockPolicy.DEFAULT_ANIMATE,
@@ -147,9 +143,6 @@ data class AtmosphereRenderState(
             clockLockedProgress = clockLockedProgress.finiteOr(0f),
             clockUnlockedProgress = clockUnlockedProgress.finiteOr(1f),
             clockTextureAspect = clockTextureAspect.finiteOr(1f).coerceIn(0.05f, 20f),
-            clockDigitFit = clockDigitFit?.takeIf {
-                clockAdaptive && !it.unconstrained
-            },
             blobs = blobs.sanitized()
         )
     }
@@ -202,8 +195,6 @@ data class AtmosphereRenderState(
     fun clockOverlay(): ClockOverlayState = ClockOverlayState(
         enabled = clockEnabled,
         depthEnabled = clockDepthEnabled,
-        adaptive = clockAdaptive,
-        digitFit = clockDigitFit,
         styleId = clockStyleId,
         showSeconds = clockShowSeconds,
         animate = clockAnimate,

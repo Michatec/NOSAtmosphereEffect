@@ -3,7 +3,6 @@ package com.app.nosatmosphereeffect.renderer.vulkan
 import android.content.Context
 import android.graphics.Bitmap
 import android.os.SystemClock
-import com.app.nosatmosphereeffect.helper.ClockDigitFit
 import com.app.nosatmosphereeffect.helper.ClockFaceRenderer
 import com.app.nosatmosphereeffect.helper.ClockStyle
 
@@ -55,11 +54,6 @@ internal class VulkanClockTextureUploader(context: Context) {
     var color: Int
         get() = face.color
         set(value) { face.color = value }
-
-    /** Where the digits may reach; see ClockFaceRenderer.digitFit. */
-    var digitFit: ClockDigitFit?
-        get() = face.digitFit
-        set(value) { face.digitFit = value }
 
     var hourFormatOverride: Boolean?
         get() = face.hourFormatOverride

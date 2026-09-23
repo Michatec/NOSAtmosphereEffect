@@ -2,8 +2,6 @@ package com.app.nosatmosphereeffect.renderer
 
 import android.content.Context
 import android.util.Log
-import com.app.nosatmosphereeffect.helper.ClockAdaptiveResolver
-import com.app.nosatmosphereeffect.helper.ClockDigitFit
 import com.app.nosatmosphereeffect.helper.ClockFramePump
 import com.app.nosatmosphereeffect.helper.ClockOverlayState
 import com.app.nosatmosphereeffect.helper.ClockPalette
@@ -40,13 +38,7 @@ class ClockRuntime(
      * and the user is actually asking for "auto". Implementations re-apply
      * their state with the new colour and ask for a frame.
      */
-    private val onColorResolved: (Int) -> Unit,
-    /**
-     * Called on a worker thread once the adaptive clock's size for the
-     * current wallpaper is known (or changes). Implementations fold the
-     * factor into their clock state and ask for a frame.
-     */
-    private val onLayoutResolved: (ClockDigitFit?) -> Unit = {}
+    private val onColorResolved: (Int) -> Unit
 ) {
     private val appContext = context.applicationContext
     private val pump = ClockFramePump(appContext) { onTick() }
@@ -57,12 +49,6 @@ class ClockRuntime(
     @Volatile private var requestedColor: Int = ClockPalette.AUTO
     @Volatile private var resolvedAutoColor: Int? = null
     @Volatile private var closed = false
-    @Volatile private var lastState: ClockOverlayState? = null
-
-    private val adaptive = ClockAdaptiveResolver(appContext, colorWorker) {
-        val state = lastState ?: return@ClockAdaptiveResolver
-        if (!closed) onLayoutResolved(adaptiveFitFor(state))
-    }
 
     /**
      * Folds the resolved colour into [state], starts or idles the frame pump
@@ -71,11 +57,9 @@ class ClockRuntime(
      */
     fun configure(state: ClockOverlayState): ClockOverlayState {
         requestedColor = state.requestedColor
-        val colored = state.copy(
+        val resolved = state.copy(
             color = ClockPalette.resolve(state.requestedColor, resolvedAutoColor)
         ).sanitized()
-        lastState = colored
-        val resolved = colored.copy(digitFit = adaptiveFitFor(colored)).sanitized()
         pump.configure(resolved.enabled, resolved.showSeconds)
         if (resolved.enabled && ClockPalette.isAuto(requestedColor)) {
             refreshAutoColor()
@@ -86,13 +70,9 @@ class ClockRuntime(
     /** Re-applies the cached colour to a state built elsewhere. */
     fun withResolvedColor(state: ClockOverlayState): ClockOverlayState {
         return state.copy(
-            color = ClockPalette.resolve(state.requestedColor, resolvedAutoColor),
-            digitFit = adaptiveFitFor(state)
+            color = ClockPalette.resolve(state.requestedColor, resolvedAutoColor)
         ).sanitized()
     }
-
-    /** Where the digits may reach for [state] against the current wallpaper. */
-    fun adaptiveFitFor(state: ClockOverlayState): ClockDigitFit? = adaptive.fitFor(state)
 
     fun setEngineVisible(visible: Boolean) {
         pump.setVisible(visible)
@@ -105,17 +85,10 @@ class ClockRuntime(
     fun invalidateWallpaperColor() {
         ClockPalette.invalidateAutoColor()
         if (ClockPalette.isAuto(requestedColor)) refreshAutoColor()
-        // A new photo has a new subject; re-derive (and cache) its profile.
-        adaptive.invalidate()
-        lastState?.let { state ->
-            val fit = adaptiveFitFor(state)
-            if (!closed) onLayoutResolved(fit)
-        }
     }
 
     fun close() {
         closed = true
-        adaptive.close()
         pump.close()
         colorWorker.shutdownNow()
     }
