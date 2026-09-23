@@ -56,6 +56,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -82,7 +83,18 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.app.nosatmosphereeffect.helper.AtmosphereClockPolicy
+import com.app.nosatmosphereeffect.helper.ClockFaceBox
 import com.app.nosatmosphereeffect.helper.ClockFaceRenderer
+import android.os.SystemClock
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.geometry.Rect
+import com.app.nosatmosphereeffect.helper.ClockAdaptiveLayout
+import com.app.nosatmosphereeffect.helper.ClockSubjectLayout
+import com.app.nosatmosphereeffect.helper.SubjectProfile
+import com.app.nosatmosphereeffect.ui.components.ClockBoxHandle
+import com.app.nosatmosphereeffect.ui.components.ClockBoxOverlay
+import com.app.nosatmosphereeffect.ui.components.ClockGlassPreview
 import com.app.nosatmosphereeffect.helper.ClockPalette
 import com.app.nosatmosphereeffect.helper.ClockStyle
 import com.app.nosatmosphereeffect.helper.SegmentationCrashGuard
@@ -90,8 +102,6 @@ import com.app.nosatmosphereeffect.helper.SubjectMaskDiagnostics
 import com.app.nosatmosphereeffect.image.BitmapDecoder
 import com.app.nosatmosphereeffect.ui.components.AtmoTextButton
 import com.app.nosatmosphereeffect.ui.components.SettingSwitchRow
-import com.app.nosatmosphereeffect.ui.preview.EffectPreviewService
-import com.app.nosatmosphereeffect.ui.preview.EffectPreviewSettingsMode
 import com.app.nosatmosphereeffect.ui.theme.AtmoEngineTheme
 import java.io.File
 import kotlin.math.abs
@@ -220,29 +230,18 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
     var eyedropperArmed by remember { mutableStateOf(false) }
     var chromeVisible by remember { mutableStateOf(true) }
 
-    var activePreview by remember { mutableStateOf<EffectPreviewService?>(null) }
     var interacting by remember { mutableStateOf(false) }
     var lastInteractionMs by remember { mutableStateOf(0L) }
 
-    fun pushGeometry() {
-        activePreview?.setClockGeometry(
-            centerX = centerX,
-            top = top,
-            height = heightFraction,
-            widthScale = widthScale,
-            heightScale = heightScale,
-            opacity = opacity
-        )
-    }
-
-    fun pushFace() {
-        activePreview?.setClockFace(
-            style.id,
-            showSeconds,
-            animate,
-            ClockPalette.resolve(colorPref, autoColor),
-            hourFormat
-        )
+    // The stored width/height stretch is folded into one box the moment this
+    // screen opens: from here on the box IS the size, so there is exactly one
+    // representation on screen and one in preferences.
+    LaunchedEffect(Unit) {
+        if (heightScale != 1f && heightScale > 0f) {
+            heightFraction = AtmosphereClockPolicy.sanitizeHeight(heightFraction * heightScale)
+            widthScale = AtmosphereClockPolicy.sanitizeAxisScale(widthScale / heightScale)
+            heightScale = 1f
+        }
     }
 
     var wallpaperBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -253,7 +252,6 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
     }
     LaunchedEffect(Unit) {
         autoColor = withContext(Dispatchers.IO) { ClockPalette.autoColorFor(context) }
-        pushFace()
     }
 
     // SubjectMaskDiagnostics is a plain in-memory holder written from the
@@ -305,7 +303,7 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
     }
 
     LaunchedEffect(
-        centerX, top, heightFraction, opacity, style,
+        centerX, top, heightFraction, widthScale, heightScale, opacity, style,
         showSeconds, animate, colorPref, hourFormat
     ) {
         delay(350)
@@ -324,6 +322,189 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
     )
 
     var containerSizePx by remember { mutableStateOf(IntSize.Zero) }
+    val containerWidthPx = containerSizePx.width.toFloat()
+    val containerHeightPx = containerSizePx.height.toFloat()
+
+    // The face bitmap, redrawn on a worker and handed over as an immutable
+    // copy: the renderer reuses one bitmap, and the preview must never read it
+    // while it is being drawn into.
+    val faceRenderer = remember { ClockFaceRenderer(context) }
+    var faceBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var faceRevision by remember { mutableIntStateOf(0) }
+    var faceAspect by remember { mutableFloatStateOf(1f) }
+    // Where the digits sit inside the face texture. The texture carries margin
+    // for the digit animation, so the box the user drags is this content area
+    // rather than the whole texture — otherwise the frame would float well
+    // clear of the digits it is supposed to be sizing.
+    var faceContent by remember {
+        mutableStateOf(ClockFaceBox(aspect = 1f, left = 0f, top = 0f, right = 1f, bottom = 1f))
+    }
+    DisposableEffect(faceRenderer) {
+        onDispose { faceRenderer.release() }
+    }
+
+    val adaptiveEnabled = remember {
+        prefs.getBoolean(
+            AtmosphereClockPolicy.ADAPTIVE_KEY,
+            AtmosphereClockPolicy.DEFAULT_ADAPTIVE
+        )
+    }
+    var subjectProfile by remember { mutableStateOf<SubjectProfile?>(null) }
+    var subjectChecked by remember { mutableStateOf(false) }
+    LaunchedEffect(adaptiveEnabled) {
+        if (!adaptiveEnabled) {
+            subjectChecked = true
+            return@LaunchedEffect
+        }
+        subjectProfile = withContext(Dispatchers.IO) { ClockSubjectLayout.compute(context) }
+        subjectChecked = true
+    }
+
+    val resolvedColor = ClockPalette.resolve(colorPref, autoColor)
+    val screenAspect = if (containerHeightPx > 0f) containerWidthPx / containerHeightPx else 0.5f
+    // The box: height is the stored fraction, width follows from the face's
+    // own proportions and the user's width stretch — the same arithmetic the
+    // shaders do, so what is dragged here is what the wallpaper draws.
+    val boxHeight = heightFraction.coerceIn(
+        AtmosphereClockPolicy.MIN_HEIGHT,
+        AtmosphereClockPolicy.MAX_HEIGHT
+    )
+    val boxWidth = if (screenAspect > 0f) {
+        boxHeight * faceAspect * widthScale / screenAspect
+    } else {
+        boxHeight
+    }
+    val box = Rect(
+        left = centerX - boxWidth / 2f,
+        top = top,
+        right = centerX + boxWidth / 2f,
+        bottom = top + boxHeight
+    )
+    // What the user sees and drags: the digits' own frame.
+    val contentBox = Rect(
+        left = box.left + faceContent.left * box.width,
+        top = box.top + faceContent.top * box.height,
+        right = box.left + faceContent.right * box.width,
+        bottom = box.top + faceContent.bottom * box.height
+    )
+
+    val digitFit = remember(subjectProfile, centerX, top, boxHeight, boxWidth, adaptiveEnabled) {
+        if (!adaptiveEnabled) {
+            null
+        } else {
+            subjectProfile?.let { profile ->
+                ClockAdaptiveLayout.digitFit(
+                    profile = profile,
+                    centerX = centerX,
+                    boxTop = top,
+                    boxHeight = boxHeight,
+                    boxWidth = boxWidth
+                )
+            }
+        }
+    }
+
+    // One coroutine owns the renderer. It is keyed on the settings that change
+    // the face's shape, and reads the adaptive fit and the drag state through
+    // rememberUpdatedState instead — restarting the loop on every frame of a
+    // drag would re-measure the face on every frame of a drag.
+    val latestFit by rememberUpdatedState(digitFit)
+    val dragging by rememberUpdatedState(interacting)
+    LaunchedEffect(style, showSeconds, animate, resolvedColor, hourFormat) {
+        val measured = withContext(Dispatchers.Default) {
+            faceRenderer.style = style
+            faceRenderer.showSeconds = showSeconds
+            faceRenderer.animateDigits = animate
+            faceRenderer.animateEntry = false
+            faceRenderer.color = resolvedColor
+            faceRenderer.hourFormatOverride =
+                AtmosphereClockPolicy.hourFormatOverride(hourFormat)
+            runCatching { faceRenderer.measureFace(System.currentTimeMillis()) }.getOrNull()
+        }
+        if (measured != null) {
+            faceAspect = measured.aspect
+            faceContent = measured
+        }
+        while (true) {
+            val snapshot = withContext(Dispatchers.Default) {
+                runCatching {
+                    if (faceRenderer.digitFit != latestFit) {
+                        faceRenderer.digitFit = latestFit
+                    }
+                    // Handed over as a copy: the renderer keeps reusing its
+                    // own bitmap, and the preview must never read one that is
+                    // being drawn into.
+                    faceRenderer.render(
+                        nowMillis = System.currentTimeMillis(),
+                        uptimeMs = SystemClock.uptimeMillis()
+                    )?.copy(Bitmap.Config.ARGB_8888, false)
+                }.getOrNull()
+            }
+            if (snapshot != null) {
+                faceBitmap = snapshot
+                faceRevision++
+            }
+            val animating = faceRenderer.isAnimating(SystemClock.uptimeMillis())
+            delay(if (dragging || showSeconds || animating) 90L else 1_000L)
+        }
+    }
+
+    fun applyBox(proposed: Rect, handle: ClockBoxHandle) {
+        interacting = true
+        lastInteractionMs = System.currentTimeMillis()
+        if (screenAspect <= 0f || faceAspect <= 0f) return
+        // [proposed] is the digits' frame. Everything is worked out there, so
+        // the edge under the finger is the edge that moves, and only the last
+        // step converts back to the texture rectangle that gets stored.
+        val contentWidthFraction = (faceContent.right - faceContent.left).coerceAtLeast(0.05f)
+        val contentHeightFraction = (faceContent.bottom - faceContent.top).coerceAtLeast(0.05f)
+        val wantedContentHeight =
+            if (handle.resizesHeight) proposed.height else contentBox.height
+        val wantedContentWidth =
+            if (handle.resizesWidth) proposed.width else contentBox.width
+
+        val textureHeight = AtmosphereClockPolicy.sanitizeHeight(
+            wantedContentHeight / contentHeightFraction
+        )
+        val wantedTextureWidth = wantedContentWidth / contentWidthFraction
+        val newWidthScale = AtmosphereClockPolicy.sanitizeAxisScale(
+            wantedTextureWidth * screenAspect / (textureHeight * faceAspect)
+        )
+        val textureWidth = textureHeight * faceAspect * newWidthScale / screenAspect
+        val settledContentWidth = textureWidth * contentWidthFraction
+        val settledContentHeight = textureHeight * contentHeightFraction
+
+        val contentLeft = when (handle) {
+            ClockBoxHandle.MOVE -> proposed.left
+            ClockBoxHandle.TOP_LEFT, ClockBoxHandle.BOTTOM_LEFT, ClockBoxHandle.LEFT ->
+                contentBox.right - settledContentWidth
+            ClockBoxHandle.TOP_RIGHT, ClockBoxHandle.BOTTOM_RIGHT, ClockBoxHandle.RIGHT ->
+                contentBox.left
+            else -> contentBox.left + (contentBox.width - settledContentWidth) / 2f
+        }
+        val contentTop = when (handle) {
+            ClockBoxHandle.MOVE -> proposed.top
+            ClockBoxHandle.TOP_LEFT, ClockBoxHandle.TOP_RIGHT, ClockBoxHandle.TOP ->
+                contentBox.bottom - settledContentHeight
+            else -> contentBox.top
+        }
+
+        val textureLeft = contentLeft - faceContent.left * textureWidth
+        val textureTop = contentTop - faceContent.top * textureHeight
+        val newCenterX = textureLeft + textureWidth / 2f
+        centerX = if (abs(newCenterX - 0.5f) < CENTER_SNAP) {
+            if (abs(centerX - 0.5f) >= CENTER_SNAP) {
+                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+            }
+            0.5f
+        } else {
+            AtmosphereClockPolicy.sanitizeCenterX(newCenterX)
+        }
+        top = AtmosphereClockPolicy.sanitizeTop(textureTop)
+        heightFraction = textureHeight
+        widthScale = newWidthScale
+        heightScale = 1f
+    }
 
     Box(
         Modifier
@@ -332,13 +513,12 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
             .onSizeChanged { containerSizePx = it }
     ) {
         if (wallpaperLoadFinished) {
-            ClockCalibrationPreview(
+            ClockGlassPreview(
                 wallpaper = wallpaperBitmap,
-                onPreviewCreated = {
-                    activePreview = it
-                    pushFace()
-                    pushGeometry()
-                },
+                face = faceBitmap,
+                box = box,
+                opacity = opacity,
+                faceRevision = faceRevision,
                 modifier = Modifier.fillMaxSize()
             )
         } else {
@@ -347,89 +527,37 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
             }
         }
 
-        if (containerSizePx.width > 0 && containerSizePx.height > 0) {
-            val widthPx = containerSizePx.width.toFloat()
-            val heightPx = containerSizePx.height.toFloat()
-
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    // Taps get their own pointerInput so they can coexist with
-                    // the transform gestures below: a tap with no movement
-                    // never reaches the transform detector, and a drag never
-                    // fires a tap.
-                    .pointerInput(eyedropperArmed, wallpaperBitmap, widthPx, heightPx) {
-                        detectTapGestures { position ->
-                            val source = wallpaperBitmap
-                            if (eyedropperArmed && source != null) {
-                                val sampled = sampleWallpaperColor(
-                                    bitmap = source,
-                                    tap = position,
-                                    viewWidth = widthPx,
-                                    viewHeight = heightPx
-                                )
-                                if (sampled != null) {
-                                    colorPref = sampled
-                                    eyedropperArmed = false
-                                    haptics.performHapticFeedback(
-                                        HapticFeedbackType.LongPress
-                                    )
-                                    pushFace()
-                                }
-                            } else {
-                                chromeVisible = !chromeVisible
-                            }
-                        }
-                    }
-                    .pointerInput(widthPx, heightPx) {
-                        detectTransformGestures { _, pan, zoom, _ ->
-                            interacting = true
-                            lastInteractionMs = System.currentTimeMillis()
-
-                            val proposed = centerX + pan.x / widthPx
-                            centerX = if (abs(proposed - 0.5f) < CENTER_SNAP) {
-                                if (abs(centerX - 0.5f) >= CENTER_SNAP) {
-                                    haptics.performHapticFeedback(
-                                        HapticFeedbackType.LongPress
-                                    )
-                                }
-                                0.5f
-                            } else {
-                                AtmosphereClockPolicy.sanitizeCenterX(proposed)
-                            }
-                            top = AtmosphereClockPolicy.sanitizeTop(top + pan.y / heightPx)
-                            if (zoom != 1f) {
-                                heightFraction = AtmosphereClockPolicy.sanitizeHeight(
-                                    heightFraction * zoom
-                                )
-                            }
-                            pushGeometry()
-                        }
-                    }
-            ) {
-                if (guideAlpha > 0.01f) {
-                    Canvas(Modifier.fillMaxSize()) {
-                        val guideColor = Color.White.copy(alpha = 0.55f * guideAlpha)
-                        val centred = abs(centerX - 0.5f) < 0.001f
-                        drawLine(
-                            color = if (centred) {
-                                Color(0xFF7FD1FF).copy(alpha = 0.9f * guideAlpha)
-                            } else {
-                                guideColor
-                            },
-                            start = Offset(centerX * size.width, 0f),
-                            end = Offset(centerX * size.width, size.height),
-                            strokeWidth = 1.dp.toPx()
+        if (containerWidthPx > 0f && containerHeightPx > 0f) {
+            ClockBoxOverlay(
+                box = contentBox,
+                centered = abs(centerX - 0.5f) < 0.001f,
+                showHandles = !eyedropperArmed,
+                onBoxChange = ::applyBox,
+                onDragStarted = {
+                    interacting = true
+                    lastInteractionMs = System.currentTimeMillis()
+                },
+                onDragFinished = { lastInteractionMs = System.currentTimeMillis() },
+                onTap = { position ->
+                    val source = wallpaperBitmap
+                    if (eyedropperArmed && source != null) {
+                        val sampled = sampleWallpaperColor(
+                            bitmap = source,
+                            tap = position,
+                            viewWidth = containerWidthPx,
+                            viewHeight = containerHeightPx
                         )
-                        drawLine(
-                            color = guideColor,
-                            start = Offset(0f, top * size.height),
-                            end = Offset(size.width, top * size.height),
-                            strokeWidth = 1.dp.toPx()
-                        )
+                        if (sampled != null) {
+                            colorPref = sampled
+                            eyedropperArmed = false
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        }
+                    } else {
+                        chromeVisible = !chromeVisible
                     }
-                }
-            }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
         }
 
         AnimatedVisibility(
@@ -460,7 +588,7 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
                     if (eyedropperArmed) {
                         "Tap the wallpaper to pick a colour"
                     } else {
-                        "Drag to move · pinch to resize · tap to hide"
+                        "Drag the box to move · corners resize · tap to hide"
                     },
                     color = Color.White,
                     style = MaterialTheme.typography.bodyMedium,
@@ -478,41 +606,36 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
             ClockControls(
                 thumbnails = thumbnails,
                 selected = style,
-                onStyleSelected = { style = it; pushFace() },
-                heightFraction = heightFraction,
-                onHeightChange = {
-                    heightFraction = AtmosphereClockPolicy.sanitizeHeight(it)
-                    pushGeometry()
-                },
-                widthScale = widthScale,
-                onWidthScaleChange = {
-                    widthScale = AtmosphereClockPolicy.sanitizeAxisScale(it)
-                    pushGeometry()
-                },
-                heightScale = heightScale,
-                onHeightScaleChange = {
-                    heightScale = AtmosphereClockPolicy.sanitizeAxisScale(it)
-                    pushGeometry()
-                },
+                onStyleSelected = { style = it },
                 opacity = opacity,
-                onOpacityChange = {
-                    opacity = AtmosphereClockPolicy.sanitizeOpacity(it)
-                    pushGeometry()
-                },
+                onOpacityChange = { opacity = AtmosphereClockPolicy.sanitizeOpacity(it) },
                 showSeconds = showSeconds,
-                onShowSecondsChange = { showSeconds = it; pushFace() },
+                onShowSecondsChange = { showSeconds = it },
                 animate = animate,
-                onAnimateChange = { animate = it; pushFace() },
+                onAnimateChange = { animate = it },
                 hourFormat = hourFormat,
-                onHourFormatChange = { hourFormat = it; pushFace() },
+                onHourFormatChange = { hourFormat = it },
                 colorPref = colorPref,
                 autoColor = autoColor,
-                onColorSelected = { colorPref = it; pushFace() },
+                onColorSelected = { colorPref = it },
                 pickerOpen = pickerOpen,
                 onTogglePicker = { pickerOpen = !pickerOpen },
                 canEyedrop = wallpaperBitmap != null,
                 onArmEyedropper = { eyedropperArmed = true },
                 maskFailure = maskFailure,
+                adaptiveNotice = when {
+                    !adaptiveEnabled ->
+                        "Adaptive size is off — turn it on in Advanced Settings " +
+                            "to have the digits fit around the subject."
+                    !subjectChecked -> "Looking for a subject in this photo…"
+                    subjectProfile == null ->
+                        "No clear subject in this photo, so the digits keep their " +
+                            "full height."
+                    digitFit == null ->
+                        "The subject is clear of the box, so the digits keep their " +
+                            "full height. Drag the box over it to see them fit."
+                    else -> "Digits are fitted above the subject."
+                },
                 segmentationDisabled = SegmentationCrashGuard.isDisabled(context),
                 onResetSegmentation = { SegmentationCrashGuard.reset(context) },
                 onResetPlacement = {
@@ -520,9 +643,9 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
                     centerX = AtmosphereClockPolicy.DEFAULT_CENTER_X
                     top = AtmosphereClockPolicy.DEFAULT_TOP
                     heightFraction = AtmosphereClockPolicy.DEFAULT_HEIGHT
+                    widthScale = AtmosphereClockPolicy.DEFAULT_WIDTH_SCALE
+                    heightScale = AtmosphereClockPolicy.DEFAULT_HEIGHT_SCALE
                     opacity = AtmosphereClockPolicy.DEFAULT_OPACITY
-                    pushGeometry()
-                    pushFace()
                 }
             )
         }
@@ -534,12 +657,6 @@ private fun ClockControls(
     thumbnails: Map<ClockStyle, ImageBitmap>,
     selected: ClockStyle,
     onStyleSelected: (ClockStyle) -> Unit,
-    heightFraction: Float,
-    onHeightChange: (Float) -> Unit,
-    widthScale: Float,
-    onWidthScaleChange: (Float) -> Unit,
-    heightScale: Float,
-    onHeightScaleChange: (Float) -> Unit,
     opacity: Float,
     onOpacityChange: (Float) -> Unit,
     showSeconds: Boolean,
@@ -556,6 +673,7 @@ private fun ClockControls(
     canEyedrop: Boolean,
     onArmEyedropper: () -> Unit,
     maskFailure: String?,
+    adaptiveNotice: String?,
     segmentationDisabled: Boolean,
     onResetSegmentation: () -> Unit,
     onResetPlacement: () -> Unit
@@ -631,34 +749,10 @@ private fun ClockControls(
         }
 
         Spacer(Modifier.height(10.dp))
-        // Runs to the policy's real ceiling rather than stopping at 0.40.
-        // The clamp always allowed 0.65; the slider just would not go there,
-        // so the biggest faces could never actually be made big.
-        LabelledSlider(
-            label = "Size",
-            value = heightFraction,
-            valueRange = AtmosphereClockPolicy.MIN_HEIGHT..
-                AtmosphereClockPolicy.MAX_HEIGHT,
-            onValueChange = onHeightChange
-        )
-        // Separate from Size on purpose: Size is one number everyone
-        // understands, and these two reshape whatever it is set to. Someone
-        // who never opens them keeps the face's natural proportions, because
-        // both default to a no-op 1.0.
-        LabelledSlider(
-            label = "Width",
-            value = widthScale,
-            valueRange = AtmosphereClockPolicy.MIN_AXIS_SCALE..
-                AtmosphereClockPolicy.MAX_AXIS_SCALE,
-            onValueChange = onWidthScaleChange
-        )
-        LabelledSlider(
-            label = "Height",
-            value = heightScale,
-            valueRange = AtmosphereClockPolicy.MIN_AXIS_SCALE..
-                AtmosphereClockPolicy.MAX_AXIS_SCALE,
-            onValueChange = onHeightScaleChange
-        )
+        // No size sliders: the box on the preview is the size control. Drag it
+        // to move the clock, drag a corner for both dimensions or an edge for
+        // one — which is both fewer controls and the only way to see what a
+        // given size does against the actual photo.
         LabelledSlider(
             label = "Opacity",
             value = opacity,
@@ -714,6 +808,7 @@ private fun ClockControls(
                     "system component, so nothing will occlude the clock until it " +
                     "is re-enabled."
             maskFailure != null -> "No depth effect yet: $maskFailure"
+            adaptiveNotice != null -> adaptiveNotice
             else -> null
         }
         if (notice != null) {
@@ -1018,49 +1113,6 @@ private fun sampleWallpaperColor(
     } catch (_: IllegalArgumentException) {
         null
     }
-}
-
-@Composable
-private fun ClockCalibrationPreview(
-    wallpaper: Bitmap?,
-    onPreviewCreated: (EffectPreviewService) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-    val preview = remember(wallpaper) {
-        EffectPreviewService(
-            context = context,
-            effectId = "ORIGINAL",
-            source = wallpaper,
-            cornerRadiusPx = 0f,
-            settingsMode = EffectPreviewSettingsMode.SAVED_ACTIVE,
-            forceOpenGlEs = true,
-            clockAlwaysVisible = true
-        )
-    }
-
-    DisposableEffect(preview, lifecycleOwner) {
-        val lifecycle = lifecycleOwner.lifecycle
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_RESUME -> preview.resume()
-                Lifecycle.Event.ON_PAUSE -> preview.pause()
-                else -> Unit
-            }
-        }
-        lifecycle.addObserver(observer)
-        if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) preview.resume()
-        preview.setAppliedState(effectApplied = false) // lock-screen endpoint
-        onPreviewCreated(preview)
-
-        onDispose {
-            lifecycle.removeObserver(observer)
-            preview.release()
-        }
-    }
-
-    AndroidView(factory = { preview.view }, modifier = modifier)
 }
 
 private fun renderStyleThumbnails(

@@ -72,13 +72,16 @@ enum class ClockStyle(
     val liquidGlass: Boolean = false
 ) {
     /**
-     * Hours and minutes side by side. The adaptive layout stretches each digit
+     * Hours and minutes side by side. Ids are kept as "liquid_glass" so the
+     * rename does not reset anyone's stored face.
+     *
+     * The adaptive layout stretches each digit
      * on its own, so a clock over a head can end up with tall digits either
      * side of a short one.
      */
     LIQUID_GLASS(
         id = "liquid_glass",
-        label = "Liquid Glass",
+        label = "Glass",
         description = "Glass digits in one row",
         familyName = "sans-serif-black",
         weight = 900,
@@ -97,7 +100,7 @@ enum class ClockStyle(
      */
     LIQUID_GLASS_STACKED(
         id = "liquid_glass_stacked",
-        label = "Liquid Glass Stacked",
+        label = "Glass Stacked",
         description = "Glass digits, hours above minutes",
         familyName = "sans-serif-black",
         weight = 900,
@@ -673,7 +676,15 @@ class ClockFaceRenderer(private val context: Context) {
         // vertical budget is much larger than the horizontal one and a shared
         // value would waste bitmap width on every upload.
         val travelEm = max(TRANSITION_TRAVEL_EM, ENTRY_RISE_EM)
-        val bloomedShadowEm = SHADOW_RADIUS_EM * (1f + ENTRY_BLOOM)
+        // A glass face draws no shadow, so it needs no room for one. That was
+        // most of the padding: it left the visible digits sitting inside a
+        // texture a third larger than they are, which both wasted upload
+        // bandwidth and made the calibration box look loose around them.
+        val bloomedShadowEm = if (style.liquidGlass) {
+            0f
+        } else {
+            SHADOW_RADIUS_EM * (1f + ENTRY_BLOOM)
+        }
         val paddingY = TEXT_SIZE_PX *
             (travelEm + (bloomedShadowEm + OVERSHOOT_MARGIN_EM) * stretch)
         val paddingX = TEXT_SIZE_PX * (bloomedShadowEm + OVERSHOOT_MARGIN_EM)

@@ -79,8 +79,11 @@ object AtmosphereClockPolicy {
     const val DEFAULT_HEIGHT = 0.24f
     const val DEFAULT_WIDTH_SCALE = 1f
     const val DEFAULT_HEIGHT_SCALE = 1f
-    const val MIN_AXIS_SCALE = 0.55f
-    const val MAX_AXIS_SCALE = 1.8f
+    // Wider than the sliders these replaced allowed: the box is dragged, so
+    // the limit people run into should be the shape they wanted, not a number
+    // chosen to keep a slider tidy.
+    const val MIN_AXIS_SCALE = 0.35f
+    const val MAX_AXIS_SCALE = 2.6f
     const val DEFAULT_OPACITY = 1f
     const val DEFAULT_DEPTH = true
     const val DEFAULT_ADAPTIVE = true
