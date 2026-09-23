@@ -150,6 +150,60 @@ class ClockBoxPlacementTest {
     }
 
     @Test
+    fun `a tall clock still reaches the top of the screen`() {
+        // The regression: the stored top is the face TEXTURE's top, and the
+        // digits start a fraction of its height below that. Clamping the
+        // texture meant the taller the clock, the further down it stopped.
+        val tall = start.copy(height = 0.5f)
+        val short = start.copy(height = 0.1f)
+
+        val tallTop = contentOf(drag(ClockBoxHandle.MOVE, dy = -1f, from = tall)).top
+        val shortTop = contentOf(drag(ClockBoxHandle.MOVE, dy = -1f, from = short)).top
+
+        assertEquals("a tall clock must reach the top edge", 0f, tallTop, 1e-4f)
+        assertEquals("a short clock must reach the top edge", 0f, shortTop, 1e-4f)
+    }
+
+    @Test
+    fun `the clock reaches every edge at any size`() {
+        listOf(0.08f, 0.24f, 0.5f, 0.9f).forEach { height ->
+            val sized = start.copy(height = height)
+            val up = contentOf(drag(ClockBoxHandle.MOVE, dy = -2f, from = sized))
+            val down = contentOf(drag(ClockBoxHandle.MOVE, dy = 2f, from = sized))
+            val left = contentOf(drag(ClockBoxHandle.MOVE, dx = -2f, from = sized))
+            val right = contentOf(drag(ClockBoxHandle.MOVE, dx = 2f, from = sized))
+
+            assertEquals("height $height cannot reach the top", 0f, up.top, 1e-4f)
+            assertEquals("height $height cannot reach the bottom", 1f, down.bottom, 1e-4f)
+            assertEquals("height $height cannot reach the left", 0f, left.left, 1e-4f)
+            assertEquals("height $height cannot reach the right", 1f, right.right, 1e-4f)
+        }
+    }
+
+    @Test
+    fun `the clock never leaves the screen`() {
+        ClockBoxHandle.entries.forEach { handle ->
+            listOf(-2f, -0.3f, 0.3f, 2f).forEach { delta ->
+                val settled = drag(handle, dx = delta, dy = delta, from = start.copy(height = 0.4f))
+                val box = contentOf(settled)
+                assertTrue("$handle by $delta left the screen: $box", box.left >= -1e-4f)
+                assertTrue("$handle by $delta left the screen: $box", box.top >= -1e-4f)
+                assertTrue("$handle by $delta left the screen: $box", box.right <= 1f + 1e-4f)
+                assertTrue("$handle by $delta left the screen: $box", box.bottom <= 1f + 1e-4f)
+            }
+        }
+    }
+
+    @Test
+    fun `growing past an edge stops at the edge rather than overflowing`() {
+        val grown = drag(ClockBoxHandle.BOTTOM, dy = 3f)
+        val box = contentOf(grown)
+
+        assertTrue("should have grown", box.height > contentOf(start).height)
+        assertTrue("bottom edge overflowed: $box", box.bottom <= 1f + 1e-4f)
+    }
+
+    @Test
     fun `shrinking past the limit stops at the limit instead of inverting`() {
         val tiny = drag(ClockBoxHandle.BOTTOM_RIGHT, dx = -1f, dy = -1f)
 

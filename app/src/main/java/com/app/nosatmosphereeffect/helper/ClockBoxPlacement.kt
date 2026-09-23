@@ -129,12 +129,16 @@ object ClockBoxPlacement {
 
         // A move must not touch the size at all, so it keeps the stored
         // numbers rather than reconstructing them from the box.
-        val height = if (handle.resizesHeight) {
+        val requestedHeight = if (handle.resizesHeight) {
             AtmosphereClockPolicy.sanitizeHeight(wantedContentHeight / contentHeightFraction)
         } else {
             start.height
         }
-        val widthScale = if (handle.resizesWidth) {
+        // The digits may fill the screen but not leave it, so the height is
+        // capped where the digits reach the screen's full height.
+        val height = requestedHeight.coerceAtMost(1f / contentHeightFraction)
+
+        val requestedWidthScale = if (handle.resizesWidth) {
             AtmosphereClockPolicy.sanitizeAxisScale(
                 (wantedContentWidth / contentWidthFraction) * screenAspect /
                     (height * faceAspect)
@@ -149,6 +153,10 @@ object ClockBoxPlacement {
         } else {
             start.widthScale
         }
+        // The same cap across: a clock wider than the screen could not be
+        // placed without part of it hanging off the side.
+        val maxWidthScale = screenAspect / (height * faceAspect * contentWidthFraction)
+        val widthScale = requestedWidthScale.coerceAtMost(maxWidthScale)
 
         val settled = ClockPlacement(
             centerX = start.centerX,
@@ -174,11 +182,23 @@ object ClockBoxPlacement {
             else -> startContent.top
         }
 
+        // The only placement rule: the digits stay on screen. Within that the
+        // clock goes anywhere at any size — including hard against an edge,
+        // which the old texture-space limits made impossible for a tall clock.
+        val clampedLeft = contentLeft.coerceIn(
+            minOf(0f, 1f - settledContent.width),
+            maxOf(0f, 1f - settledContent.width)
+        )
+        val clampedTop = contentTop.coerceIn(
+            minOf(0f, 1f - settledContent.height),
+            maxOf(0f, 1f - settledContent.height)
+        )
+
         // Back out to the texture rectangle, which is what gets stored.
         val textureWidth = settledContent.width / contentWidthFraction
         val textureHeight = settledContent.height / contentHeightFraction
-        val centerX = contentLeft - content.left * textureWidth + textureWidth / 2f
-        val top = contentTop - content.top * textureHeight
+        val centerX = clampedLeft - content.left * textureWidth + textureWidth / 2f
+        val top = clampedTop - content.top * textureHeight
 
         return ClockPlacement(
             centerX = AtmosphereClockPolicy.sanitizeCenterX(
