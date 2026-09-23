@@ -86,12 +86,24 @@ object AtmosphereClockPolicy {
     const val HOUR_FORMAT_24 = "24"
     const val DEFAULT_HOUR_FORMAT = HOUR_FORMAT_SYSTEM
 
-    private const val MIN_CENTER_X = 0.05f
-    private const val MAX_CENTER_X = 0.95f
-    private const val MIN_TOP = 0.02f
-    private const val MAX_TOP = 0.90f
+    // Loose validity guards, not placement rules.
+    //
+    // These bound what may be *stored*; where the clock may actually sit is
+    // decided by ClockBoxPlacement, which knows where the digits are inside
+    // the face texture. [TOP_KEY] is the top of that texture, and the digits
+    // begin a fraction of the texture's height below it — so a fixed floor
+    // here stopped a tall clock further down the screen than a short one,
+    // which is the opposite of a limit anyone asked for.
+    private const val MIN_CENTER_X = 0f
+    private const val MAX_CENTER_X = 1f
+    private const val MIN_TOP = -0.5f
+    private const val MAX_TOP = 1f
     const val MIN_HEIGHT = 0.03f
-    const val MAX_HEIGHT = 0.65f
+    /**
+     * Large enough for the digits to fill the screen's height; how big the
+     * clock may actually get is capped by the screen, in ClockBoxPlacement.
+     */
+    const val MAX_HEIGHT = 1.6f
 
     /** All keys this feature owns, for the Advanced Settings reset path. */
     val ALL_KEYS: List<String> = listOf(
