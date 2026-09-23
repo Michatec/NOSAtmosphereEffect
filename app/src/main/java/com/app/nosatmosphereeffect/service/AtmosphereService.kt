@@ -3,10 +3,8 @@ package com.app.nosatmosphereeffect.service
 import android.content.SharedPreferences
 import android.graphics.Bitmap
 import com.app.nosatmosphereeffect.helper.AtmosphereGlassPolicy
-import com.app.nosatmosphereeffect.helper.ClockPreferences
 import com.app.nosatmosphereeffect.helper.GLWallpaperService
 import com.app.nosatmosphereeffect.helper.GlassEffectPreferences
-import com.app.nosatmosphereeffect.helper.PlaylistModeManager
 import com.app.nosatmosphereeffect.renderer.AtmosphereRenderController
 
 class AtmosphereService :
@@ -67,15 +65,7 @@ class AtmosphereService :
         // the clock stays off there — a position calibrated against one photo
         // is wrong for the next. See AtmosphereClockPolicy.resolveEnabled.
         renderer.configureClock(
-            ClockPreferences.read(
-                preferences = preferences,
-                effectId = effectId,
-                singleImageMode = !PlaylistModeManager.isPlaylistMode(
-                    applicationContext
-                ),
-                lockedProgress = lockedProgress,
-                unlockedProgress = unlockedProgress
-            )
+            readClockState(preferences)
         )
     }
 

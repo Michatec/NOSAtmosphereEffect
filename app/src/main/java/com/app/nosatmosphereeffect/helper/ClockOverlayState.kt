@@ -34,6 +34,15 @@ data class ClockOverlayState(
      * [AtmosphereClockPolicy.supportsDepth].
      */
     val depthEnabled: Boolean = AtmosphereClockPolicy.DEFAULT_DEPTH,
+    /** Shrink to stay clear of the subject — see [AtmosphereClockPolicy.ADAPTIVE_KEY]. */
+    val adaptive: Boolean = AtmosphereClockPolicy.DEFAULT_ADAPTIVE,
+    /**
+     * Derived, not a preference: how far down each column of the clock box the
+     * digits may reach before they would touch the subject. Null when adaptive
+     * is off or nothing is in the way. Computed by ClockAdaptiveResolver from
+     * the profile ClockSubjectLayout caches per wallpaper.
+     */
+    val digitFit: ClockDigitFit? = null,
     val styleId: String = ClockStyle.DEFAULT.id,
     val showSeconds: Boolean = AtmosphereClockPolicy.DEFAULT_SECONDS,
     val animate: Boolean = AtmosphereClockPolicy.DEFAULT_ANIMATE,
@@ -108,7 +117,8 @@ data class ClockOverlayState(
             screenId = ClockScreenPolicy.sanitizeScreenId(screenId),
             lockedProgress = lockedProgress.finiteOr(0f),
             unlockedProgress = unlockedProgress.finiteOr(1f),
-            textureAspect = textureAspect.finiteOr(1f).coerceIn(0.05f, 20f)
+            textureAspect = textureAspect.finiteOr(1f).coerceIn(0.05f, 20f),
+            digitFit = digitFit?.takeIf { adaptive && !it.unconstrained }
         )
     }
 
@@ -149,6 +159,10 @@ data class ClockOverlayState(
     val renderHeight: Float
         get() = height * heightScale
 
+    /** True when the face should be drawn as refracting glass. */
+    val liquidGlass: Boolean
+        get() = style.liquidGlass
+
     /**
      * The top edge the renderers should actually use.
      *
@@ -160,6 +174,8 @@ data class ClockOverlayState(
      * slider changes the shape and nothing else.
      */
     val renderTop: Float
+        // Re-centred rather than anchored at the top edge, so raising the
+        // height slider grows the clock both ways instead of sinking it.
         get() = top + (height - renderHeight) / 2f
 
     /**

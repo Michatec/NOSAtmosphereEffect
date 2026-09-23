@@ -21,6 +21,7 @@ import com.app.nosatmosphereeffect.helper.ClockPalette
 import com.app.nosatmosphereeffect.helper.ClockOverlayState
 import com.app.nosatmosphereeffect.helper.ClockPreferences
 import com.app.nosatmosphereeffect.helper.PlaylistModeManager
+import com.app.nosatmosphereeffect.helper.ClockScreen
 import com.app.nosatmosphereeffect.helper.ClockStyle
 import com.app.nosatmosphereeffect.helper.EffectStatePolicy
 import com.app.nosatmosphereeffect.helper.GlassEffectPreferences
@@ -59,9 +60,26 @@ class EffectPreviewService(
     private val settingsMode: EffectPreviewSettingsMode =
         EffectPreviewSettingsMode.SAVED_ACTIVE,
     private val atmosphereGlassEnabledOverride: Boolean? = null,
-    private val forceOpenGlEs: Boolean = false
+    private val forceOpenGlEs: Boolean = false,
+    /**
+     * Shows the clock whatever the lock/home setting says. The calibration
+     * screen exists to position the clock, so it must never be invisible
+     * there because the effect happens to be showing its other side.
+     */
+    private val clockAlwaysVisible: Boolean = false
 ) {
     private val appContext = context.applicationContext
+
+    /** Shows the adaptive clock size here too; re-fits once the profile is known. */
+    private val clockAdaptiveWorker = java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "AtmoPreviewClockLayout").apply { isDaemon = true }
+    }
+    private val clockAdaptive = com.app.nosatmosphereeffect.helper.ClockAdaptiveResolver(
+        appContext,
+        clockAdaptiveWorker
+    ) {
+        android.os.Handler(android.os.Looper.getMainLooper()).post { updateClock { it } }
+    }
     private val released = AtomicBoolean(false)
     private val sourceLock = Any()
     private val sourceBitmap = source?.copy(Bitmap.Config.ARGB_8888, false)
@@ -77,7 +95,15 @@ class EffectPreviewService(
     }
     private var configuredAtmosphereGlassEnabled = false
     private var configuredAtmosphereGlassBackgroundOnly = false
-    private val renderState = AtomicReference(createInitialState())
+    private val renderState = AtomicReference(
+        createInitialState().let { initial ->
+            val clock = EffectPreviewStatePolicy.clockOf(initial)
+            EffectPreviewStatePolicy.withClock(
+                initial,
+                clock.copy(digitFit = clockAdaptive.fitFor(clock))
+            )
+        }
+    )
     private val previewContainer = PreviewContainerView(context, cornerRadiusPx)
 
     private var activeBackend = GraphicsBackend.OPENGL_ES
@@ -216,9 +242,11 @@ class EffectPreviewService(
     ) {
         if (released.get()) return
         val snapshot = renderState.updateAndGet { state ->
+            val next = transform(EffectPreviewStatePolicy.clockOf(state))
+                .forcedVisibleIfNeeded()
             EffectPreviewStatePolicy.withClock(
                 state,
-                transform(EffectPreviewStatePolicy.clockOf(state))
+                next.copy(digitFit = clockAdaptive.fitFor(next))
             )
         }
         when (activeBackend) {
@@ -320,6 +348,8 @@ class EffectPreviewService(
 
     fun release() {
         if (!released.compareAndSet(false, true)) return
+        clockAdaptive.close()
+        clockAdaptiveWorker.shutdownNow()
         val wasResumed = resumed
         resumed = false
         vulkanSession?.close()
@@ -354,8 +384,14 @@ class EffectPreviewService(
             color = ClockPalette.resolve(
                 clock.requestedColor,
                 ClockPalette.autoColorFor(appContext)
-            )
-        ).sanitized()
+            ),
+            digitFit = clockAdaptive.fitFor(clock)
+        ).forcedVisibleIfNeeded().sanitized()
+    }
+
+    private fun ClockOverlayState.forcedVisibleIfNeeded(): ClockOverlayState {
+        if (!clockAlwaysVisible) return this
+        return copy(enabled = true, screenId = ClockScreen.BOTH.id)
     }
 
     private fun createInitialState(): EffectPreviewRenderState {
@@ -394,6 +430,11 @@ class EffectPreviewService(
                             prefs,
                             AtmosphereClockPolicy.DEPTH_KEY,
                             AtmosphereClockPolicy.DEFAULT_DEPTH
+                        ),
+                        clockAdaptive = previewBoolean(
+                            prefs,
+                            AtmosphereClockPolicy.ADAPTIVE_KEY,
+                            AtmosphereClockPolicy.DEFAULT_ADAPTIVE
                         ),
                         clockStyleId = previewString(
                             prefs,
@@ -724,8 +765,7 @@ class EffectPreviewService(
                 renderer.clockCenterX = value.clockCenterX
                 renderer.clockTop = value.clockTop
                 renderer.clockHeight = value.clockHeight
-                renderer.clockWidthScale = value.clockWidthScale
-                renderer.clockHeightScale = value.clockHeightScale
+                renderer.clockLayout = value.clockOverlay()
                 renderer.clockOpacity = value.clockOpacity
                 renderer.clockScreen = value.clockScreen
                 renderer.clockLockedProgress = value.clockLockedProgress

@@ -231,6 +231,14 @@ object WallpaperFitHelper {
      * display settings that shape the fit, and a stamp of the wallpaper files
      * themselves so a changed wallpaper never matches a prepared one.
      */
+    /**
+     * Builds the image [loadForRender] would, without touching the posture
+     * cache — for analysis (the adaptive clock's subject profile), which must
+     * neither consume an image a renderer prepared nor park one of its own.
+     */
+    internal fun buildForAnalysis(context: Context, surfaceW: Int, surfaceH: Int): RenderImage =
+        buildRenderImage(context, surfaceW, surfaceH)
+
     internal fun renderKey(context: Context, surfaceW: Int, surfaceH: Int): WallpaperPostureCache.Key =
         WallpaperPostureCache.Key(
             width = surfaceW,

@@ -233,7 +233,8 @@ private class HalftoneBridge(
             // policy in it and both backends share one curve.
             clockOpacity = safe.clock.effectiveOpacity(safe.progress),
             clockUploaded = safe.clock.faceUploaded,
-            clockDepth = safe.clock.depthEnabled
+            clockDepth = safe.clock.depthEnabled,
+            clockGlass = safe.clock.liquidGlass
         )
     }
 

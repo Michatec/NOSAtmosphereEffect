@@ -238,7 +238,8 @@ Java_com_app_nosatmosphereeffect_renderer_vulkan_VulkanFrostedNative_nativeSetSt
     jfloat clockTextureAspect,
     jfloat clockOpacity,
     jboolean clockUploaded,
-    jboolean clockDepth
+    jboolean clockDepth,
+    jboolean clockGlass
 ) {
     FrostedHandle* frosted = fromHandle(handle);
     if (frosted == nullptr) return;
@@ -266,7 +267,8 @@ Java_com_app_nosatmosphereeffect_renderer_vulkan_VulkanFrostedNative_nativeSetSt
         clockTextureAspect,
         clockOpacity,
         clockUploaded == JNI_TRUE,
-        clockDepth == JNI_TRUE
+        clockDepth == JNI_TRUE,
+        clockGlass == JNI_TRUE
     );
     atmo::vulkan::setPushConstants(
         frosted->engine,

@@ -61,189 +61,52 @@ enum class ClockStyle(
      * Paired with [verticalStretch] rather than used alone. Tall-and-narrow is
      * what reads as a display clock; tall-and-wide just reads as large.
      */
-    val horizontalScale: Float = 1f
+    val horizontalScale: Float = 1f,
+    /**
+     * Drawn as refracting glass rather than solid colour: the shader bends,
+     * softens and highlights the wallpaper through the glyph shapes (see
+     * `compositeClock` in the effect shaders). The face bitmap only supplies
+     * the shape, so it is drawn without a drop shadow — a shadow would read
+     * as frosted glass outside the digits.
+     */
+    val liquidGlass: Boolean = false
 ) {
-    MODERN(
-        id = "modern",
-        label = "Modern",
-        description = "Light and airy, widely spaced",
-        familyName = "sans-serif-thin",
-        weight = 200,
-        letterSpacingEm = 0.06f,
-        stacked = false,
-        separatorAlpha = 0.55f,
-        verticalStretch = 1.86f,
-        horizontalScale = 0.90f
-    ),
-    DISPLAY(
-        id = "display",
-        label = "Display",
-        description = "Heavy, tightly set",
-        familyName = "sans-serif",
-        weight = 900,
-        letterSpacingEm = -0.02f,
-        stacked = false,
-        separatorAlpha = 0.8f,
-        // A 900-weight face thickens visually as it lengthens, so it carries
-        // less stretch than the thin ones before the stems look bloated.
-        verticalStretch = 1.58f,
-        horizontalScale = 0.88f
-    ),
-    SERIF(
-        id = "serif",
-        label = "Serif",
-        description = "Classic, editorial",
-        familyName = "serif",
-        weight = 400,
-        letterSpacingEm = 0.02f,
-        stacked = false,
-        separatorAlpha = 0.7f,
-        verticalStretch = 1.66f,
-        horizontalScale = 0.92f
-    ),
-    MONO(
-        id = "mono",
-        label = "Mono",
-        description = "Even, terminal-like",
-        familyName = "monospace",
-        weight = 400,
-        letterSpacingEm = 0.04f,
-        stacked = false,
-        separatorAlpha = 0.6f,
-        verticalStretch = 1.74f,
-        // Monospace is already wide by design, so it takes the most
-        // condensing before the digits start to touch.
-        horizontalScale = 0.84f
-    ),
-    STACKED(
-        id = "stacked",
-        label = "Stacked",
-        description = "Hours above minutes",
-        familyName = "sans-serif-condensed",
-        weight = 700,
-        letterSpacingEm = 0f,
-        stacked = true,
-        separatorAlpha = 0f,
-        verticalStretch = 1.60f,
-        horizontalScale = 0.94f
-    ),
-
     /**
-     * The big, heavy, tightly-set inline clock that large-phone lock screens
-     * have converged on — the one people mean when they say "make it look
-     * like the iPhone one".
-     *
-     * Named for the look rather than the vendor: shipping a face called after
-     * someone else's OS invites a trademark argument a wallpaper app does not
-     * need, and the shape is the part nobody owns.
-     *
-     * sans-serif-black rather than sans-serif at weight 900: the black family
-     * is a genuinely separate cut on most devices, where asking the regular
-     * family for weight 900 often gets a synthesised bold that thins out at
-     * large sizes. Barely condensed and only lightly stretched, because at
-     * this weight the digits are meant to read as massive, not as narrow.
+     * Hours and minutes side by side. The adaptive layout stretches each digit
+     * on its own, so a clock over a head can end up with tall digits either
+     * side of a short one.
      */
-    HEADLINE(
-        id = "cupertino",
-        label = "Headline",
-        description = "Very heavy and very large",
+    LIQUID_GLASS(
+        id = "liquid_glass",
+        label = "Liquid Glass",
+        description = "Glass digits in one row",
         familyName = "sans-serif-black",
         weight = 900,
-        letterSpacingEm = -0.055f,
+        letterSpacingEm = -0.03f,
         stacked = false,
-        separatorAlpha = 1f,
-        verticalStretch = 1.42f,
-        horizontalScale = 0.97f
+        separatorAlpha = 0.85f,
+        verticalStretch = 1.45f,
+        horizontalScale = 0.98f,
+        liquidGlass = true
     ),
 
     /**
-     * The same weight stacked into two rows, which is how a clock gets truly
-     * enormous on a phone: freed from fitting "00:00" across the width, each
-     * row can be roughly twice the size before it runs out of room.
+     * Hours above minutes: two rows of two, which is how a clock gets truly
+     * large on a phone. Freed from fitting "00:00" across the width, each row
+     * is roughly twice the size.
      */
-    POSTER(
-        id = "poster",
-        label = "Poster",
-        description = "Enormous stacked digits",
+    LIQUID_GLASS_STACKED(
+        id = "liquid_glass_stacked",
+        label = "Liquid Glass Stacked",
+        description = "Glass digits, hours above minutes",
         familyName = "sans-serif-black",
         weight = 900,
-        letterSpacingEm = -0.06f,
+        letterSpacingEm = -0.04f,
         stacked = true,
         separatorAlpha = 0f,
-        verticalStretch = 1.34f,
-        horizontalScale = 0.95f
-    ),
-
-    /**
-     * Tall condensed digits stacked in two rows. Mid-weight rather than the
-     * hairline it started as — at 300 it read as a caption sitting where a
-     * clock should be.
-     */
-    COLUMN(
-        id = "column",
-        label = "Column",
-        description = "Tall condensed digits, hours above minutes",
-        familyName = "sans-serif-condensed",
-        weight = 600,
-        letterSpacingEm = 0.01f,
-        stacked = true,
-        separatorAlpha = 0f,
-        verticalStretch = 1.72f,
-        horizontalScale = 0.86f
-    ),
-
-    /**
-     * Ultra-thin, very tall and widely tracked. The hairline weight is what
-     * lets the stretch go this far — at 100 the stems stay hairlines however
-     * long they get, where a heavier face would read as smeared.
-     */
-    AURORA(
-        id = "aurora",
-        label = "Aurora",
-        description = "Ultra-thin, tall and widely spaced",
-        familyName = "sans-serif-thin",
-        weight = 100,
-        letterSpacingEm = 0.14f,
-        stacked = false,
-        separatorAlpha = 0.35f,
-        verticalStretch = 2.05f,
-        horizontalScale = 0.88f
-    ),
-
-    /**
-     * Handwritten. The one face in the set with no straight verticals, so it
-     * is the obvious pick when nothing else feels personal enough — and the
-     * one that carries the least stretch, because a script's curves distort
-     * far more visibly than a grotesque's stems.
-     */
-    SCRIPT(
-        id = "script",
-        label = "Script",
-        description = "Handwritten and flowing",
-        familyName = "cursive",
-        weight = 400,
-        letterSpacingEm = 0.02f,
-        stacked = false,
-        separatorAlpha = 0.6f,
-        verticalStretch = 1.30f,
-        horizontalScale = 0.96f
-    ),
-
-    /**
-     * Typewriter. Slab serifs on a fixed pitch, which makes the digits sit in
-     * a visibly mechanical grid — the opposite end of the set from [SCRIPT].
-     */
-    TYPEWRITER(
-        id = "typewriter",
-        label = "Typewriter",
-        description = "Slab serif, fixed pitch",
-        familyName = "serif-monospace",
-        weight = 500,
-        letterSpacingEm = 0.03f,
-        stacked = false,
-        separatorAlpha = 0.75f,
-        verticalStretch = 1.56f,
-        horizontalScale = 0.86f
+        verticalStretch = 1.48f,
+        horizontalScale = 0.98f,
+        liquidGlass = true
     );
 
     fun typeface(): Typeface {
@@ -259,7 +122,7 @@ enum class ClockStyle(
     }
 
     companion object {
-        val DEFAULT = MODERN
+        val DEFAULT = LIQUID_GLASS_STACKED
 
         fun fromId(id: String?): ClockStyle {
             if (id == null) return DEFAULT
@@ -329,6 +192,20 @@ class ClockFaceRenderer(private val context: Context) {
             val opaque = value or (0xFF shl 24)
             if (field != opaque) {
                 field = opaque
+                invalidate()
+            }
+        }
+
+    /**
+     * Where the digits may reach before they would touch the photo's subject,
+     * or null for "nowhere in the way". Changing it only needs a redraw: the
+     * bitmap keeps its size, and only the vertical size of individual digits
+     * inside it changes.
+     */
+    var digitFit: ClockDigitFit? = null
+        set(value) {
+            if (field != value) {
+                field = value
                 invalidate()
             }
         }
@@ -509,6 +386,31 @@ class ClockFaceRenderer(private val context: Context) {
         return target
     }
 
+    /**
+     * Where the glyphs sit inside the face bitmap, without drawing anything.
+     * The bitmap carries generous padding for the animations; the adaptive
+     * layout needs the digits' real extent so it does not shrink the clock
+     * to keep empty padding clear of the subject.
+     */
+    fun measureFace(nowMillis: Long): ClockFaceBox {
+        val face = ensureLayout(formatRows(nowMillis))
+        val bitmapWidth = face.contentWidth + face.paddingX * 2f
+        val bitmapHeight = face.contentHeight + face.paddingY * 2f
+        val bounds = android.graphics.Rect()
+        textPaint.getTextBounds(DIGITS_SAMPLE, 0, DIGITS_SAMPLE.length, bounds)
+        val glyphTop = face.paddingY +
+            face.rowBaselines.first() + bounds.top * face.verticalStretch
+        val glyphBottom = face.paddingY +
+            face.rowBaselines.last() + bounds.bottom * face.verticalStretch
+        return ClockFaceBox(
+            aspect = bitmapWidth / bitmapHeight,
+            left = face.paddingX / bitmapWidth,
+            top = (glyphTop / bitmapHeight).coerceIn(0f, 1f),
+            right = (face.paddingX + face.contentWidth) / bitmapWidth,
+            bottom = (glyphBottom / bitmapHeight).coerceIn(0f, 1f)
+        )
+    }
+
     /** Re-reads the system 12/24-hour setting; call on a config change. */
     fun refreshFormat() {
         val updated = DateFormat.is24HourFormat(context)
@@ -544,6 +446,7 @@ class ClockFaceRenderer(private val context: Context) {
     // ---------------------------------------------------------------- draw
 
     private fun drawFace(target: Canvas, face: FaceLayout, uptimeMs: Long) {
+        val fits = adaptiveFits(face)
         val progress = transitionProgress(uptimeMs)
         val entry = entryProgress(uptimeMs)
         val rowCount = face.rows.size
@@ -561,6 +464,7 @@ class ClockFaceRenderer(private val context: Context) {
 
             for (slotIndex in row.slots.indices) {
                 val slot = row.slots[slotIndex]
+                val fit = fits?.getOrNull(rowIndex)?.getOrNull(slotIndex) ?: NO_FIT
                 val newChar = currentRow.getOrNull(slotIndex)
                 if (newChar == null) {
                     x += slot.advance
@@ -592,7 +496,8 @@ class ClockFaceRenderer(private val context: Context) {
                         alpha = 1f,
                         offsetY = 0f,
                         scale = 1f,
-                        entry = entrySlot
+                        entry = entrySlot,
+                        fit = fit
                     )
                 } else {
                     val eased = easeOutCubic(slotProgress)
@@ -609,7 +514,8 @@ class ClockFaceRenderer(private val context: Context) {
                         alpha = 1f - eased,
                         offsetY = -shift * eased,
                         scale = 1f - 0.10f * eased,
-                        entry = entrySlot
+                        entry = entrySlot,
+                        fit = fit
                     )
                     drawGlyph(
                         target = target,
@@ -620,7 +526,8 @@ class ClockFaceRenderer(private val context: Context) {
                         alpha = eased,
                         offsetY = shift * (1f - eased),
                         scale = 0.90f + 0.10f * eased,
-                        entry = entrySlot
+                        entry = entrySlot,
+                        fit = fit
                     )
                 }
                 x += slot.advance
@@ -644,7 +551,8 @@ class ClockFaceRenderer(private val context: Context) {
         alpha: Float,
         offsetY: Float,
         scale: Float,
-        entry: Float?
+        entry: Float?,
+        fit: SlotFit = NO_FIT
     ) {
         // Alpha leads the motion slightly: a glyph that is still travelling
         // but already solid reads as arriving, where one that fades in on the
@@ -676,12 +584,16 @@ class ClockFaceRenderer(private val context: Context) {
         textPaint.textScaleX = style.horizontalScale
         // Shadow strength tracks alpha so a fading digit does not leave a
         // hard drop shadow behind it.
-        textPaint.setShadowLayer(
-            face.textSize * SHADOW_RADIUS_EM * bloom,
-            0f,
-            face.textSize * SHADOW_DY_EM,
-            Color.argb((0x66 * finalAlpha).toInt().coerceIn(0, 255), 0, 0, 0)
-        )
+        if (style.liquidGlass) {
+            textPaint.clearShadowLayer()
+        } else {
+            textPaint.setShadowLayer(
+                face.textSize * SHADOW_RADIUS_EM * bloom,
+                0f,
+                face.textSize * SHADOW_DY_EM,
+                Color.argb((0x66 * finalAlpha).toInt().coerceIn(0, 255), 0, 0, 0)
+            )
+        }
 
         val text = character.toString()
         val glyphWidth = textPaint.measureText(text)
@@ -691,6 +603,13 @@ class ClockFaceRenderer(private val context: Context) {
         // two nested ones.
         val scaleY = scale * entryScale * face.verticalStretch
         target.save()
+        // The adaptive fit sizes this digit on its own, about the top edge of
+        // its row: a digit that has to make room for a subject gets shorter
+        // downwards while its top stays where the user placed the clock.
+        if (fit.scaleY != 1f || fit.shiftY != 0f) {
+            target.translate(0f, fit.shiftY)
+            target.scale(1f, fit.scaleY, centerX, fit.pivotY)
+        }
         target.translate(0f, offsetY + entryRise)
         target.scale(scaleX, scaleY, centerX, baseline)
         target.drawText(text, centerX - glyphWidth / 2f, baseline, textPaint)
@@ -770,6 +689,8 @@ class ClockFaceRenderer(private val context: Context) {
             rowTexts = rows,
             contentWidth = contentWidth,
             contentHeight = contentHeight,
+            rowHeight = rowHeight,
+            rowSpacing = rowSpacing,
             paddingX = paddingX,
             paddingY = paddingY,
             textSize = TEXT_SIZE_PX,
@@ -946,6 +867,104 @@ class ClockFaceRenderer(private val context: Context) {
         return 1f + (BACK_OVERSHOOT + 1f) * t.pow(3) + BACK_OVERSHOOT * t.pow(2)
     }
 
+    /**
+     * One digit's adaptive sizing: [scaleY] about [pivotY] (the top edge of
+     * its row), after moving down by [shiftY] to sit under whatever the rows
+     * above it ended up occupying.
+     */
+    private data class SlotFit(
+        val scaleY: Float = 1f,
+        val pivotY: Float = 0f,
+        val shiftY: Float = 0f
+    )
+
+    /**
+     * Sizes every digit against the subject.
+     *
+     * Each digit is measured over its own strip of the face, so a digit over
+     * empty sky keeps its full height while the one over a head is shortened.
+     *
+     * Stacked faces size a whole column at once, because their two rows share
+     * the vertical space: the bottom row absorbs most of the space that has to
+     * be given up and the rows above it share the rest (see
+     * [ClockAdaptiveLayout.stackedDigitScales]), so a
+     * subject rising into the clock mostly shortens the digit nearest to it
+     * and only slightly shortens the one above. The rows are then re-stacked
+     * under each other.
+     */
+    private fun adaptiveFits(face: FaceLayout): Array<Array<SlotFit>>? {
+        val fit = digitFit ?: return null
+        val bitmapWidth = face.contentWidth + face.paddingX * 2f
+        val bitmapHeight = face.contentHeight + face.paddingY * 2f
+        if (bitmapWidth <= 0f || bitmapHeight <= 0f || face.rowHeight <= 0f) return null
+
+        val rowStep = face.rowHeight + face.rowSpacing
+        val result = Array(face.rows.size) { rowIndex ->
+            Array(face.rows[rowIndex].slots.size) { NO_FIT }
+        }
+
+        if (!style.stacked) {
+            face.rows.forEachIndexed { rowIndex, row ->
+                val top = face.paddingY + rowStep * rowIndex
+                var x = face.paddingX + (face.contentWidth - row.width) / 2f
+                row.slots.forEachIndexed { slotIndex, slot ->
+                    val limit = fit.limitFor(x / bitmapWidth, (x + slot.advance) / bitmapWidth)
+                    result[rowIndex][slotIndex] = SlotFit(
+                        scaleY = ClockAdaptiveLayout.digitScale(
+                            available = limit * bitmapHeight - top,
+                            natural = face.rowHeight
+                        ),
+                        pivotY = top
+                    )
+                    x += slot.advance
+                }
+            }
+            return result
+        }
+
+        val columns = face.rows.maxOf { it.slots.size }
+        val top0 = face.paddingY
+        for (column in 0 until columns) {
+            // The rows are centred on each other, so a column's strip is the
+            // union of that slot's span in every row that has one.
+            var left = Float.MAX_VALUE
+            var right = -Float.MAX_VALUE
+            face.rows.forEach { row ->
+                if (column >= row.slots.size) return@forEach
+                var x = face.paddingX + (face.contentWidth - row.width) / 2f
+                for (index in 0 until column) x += row.slots[index].advance
+                left = minOf(left, x)
+                right = maxOf(right, x + row.slots[column].advance)
+            }
+            if (right < left) continue
+
+            val limit = fit.limitFor(left / bitmapWidth, right / bitmapWidth)
+            val rowCount = face.rows.count { column < it.slots.size }
+            val scales = ClockAdaptiveLayout.stackedDigitScales(
+                rowCount = rowCount,
+                rowHeight = face.rowHeight,
+                rowSpacing = face.rowSpacing,
+                available = limit * bitmapHeight - top0
+            )
+
+            var cursor = top0
+            var placed = 0
+            face.rows.forEachIndexed { rowIndex, row ->
+                if (column >= row.slots.size) return@forEachIndexed
+                val scale = scales[placed]
+                val layoutTop = face.paddingY + rowStep * rowIndex
+                result[rowIndex][column] = SlotFit(
+                    scaleY = scale,
+                    pivotY = layoutTop,
+                    shiftY = cursor - layoutTop
+                )
+                cursor += face.rowHeight * scale + face.rowSpacing
+                placed++
+            }
+        }
+        return result
+    }
+
     private data class Slot(val advance: Float)
 
     private data class RowLayout(val slots: List<Slot>, val width: Float)
@@ -956,6 +975,8 @@ class ClockFaceRenderer(private val context: Context) {
         val rowTexts: List<String>,
         val contentWidth: Float,
         val contentHeight: Float,
+        val rowHeight: Float,
+        val rowSpacing: Float,
         val paddingX: Float,
         val paddingY: Float,
         val textSize: Float,
@@ -1017,5 +1038,19 @@ class ClockFaceRenderer(private val context: Context) {
         const val DEFAULT_SLOT_COUNT = 5
 
         const val NO_TRANSITION = Long.MIN_VALUE
+        const val DIGITS_SAMPLE = "0123456789"
+        val NO_FIT = SlotFit()
     }
 }
+
+/**
+ * The glyphs' extent inside a face bitmap, as fractions of its width and
+ * height, plus the bitmap's own aspect ratio.
+ */
+data class ClockFaceBox(
+    val aspect: Float,
+    val left: Float,
+    val top: Float,
+    val right: Float,
+    val bottom: Float
+)

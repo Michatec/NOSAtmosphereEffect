@@ -305,6 +305,10 @@ class ClockFaceGeometryTest {
                 "${style.id} has an out-of-range horizontal scale",
                 style.horizontalScale in 0.8f..1f
             )
+            assertTrue(
+                "${style.id} should be a glass face",
+                style.liquidGlass
+            )
         }
     }
 
@@ -328,8 +332,13 @@ class ClockFaceGeometryTest {
         assertEquals(ids.size, ids.toSet().size)
         // Stored in preferences, so renaming one silently resets everyone
         // using it back to the default.
-        listOf("modern", "display", "serif", "mono", "stacked").forEach { id ->
+        listOf("liquid_glass", "liquid_glass_stacked").forEach { id ->
             assertEquals(id, ClockStyle.fromId(id).id)
+        }
+        // The faces this set replaced fall back to the default rather than
+        // leaving anyone with no clock at all.
+        listOf("modern", "display", "serif", "mono", "stacked").forEach { retired ->
+            assertEquals(ClockStyle.DEFAULT.id, ClockStyle.fromId(retired).id)
         }
     }
 }

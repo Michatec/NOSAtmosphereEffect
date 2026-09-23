@@ -1035,7 +1035,8 @@ private fun ClockCalibrationPreview(
             source = wallpaper,
             cornerRadiusPx = 0f,
             settingsMode = EffectPreviewSettingsMode.SAVED_ACTIVE,
-            forceOpenGlEs = true
+            forceOpenGlEs = true,
+            clockAlwaysVisible = true
         )
     }
 

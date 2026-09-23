@@ -230,7 +230,8 @@ Java_com_app_nosatmosphereeffect_renderer_vulkan_VulkanHalftoneNative_nativeSetS
     jfloat clockTextureAspect,
     jfloat clockOpacity,
     jboolean clockUploaded,
-    jboolean clockDepth
+    jboolean clockDepth,
+    jboolean clockGlass
 ) {
     HalftoneHandle* halftone = fromHandle(handle);
     if (halftone == nullptr) return;
@@ -263,7 +264,8 @@ Java_com_app_nosatmosphereeffect_renderer_vulkan_VulkanHalftoneNative_nativeSetS
         clockTextureAspect,
         clockOpacity,
         clockUploaded == JNI_TRUE,
-        clockDepth == JNI_TRUE && hasSubject == JNI_TRUE
+        clockDepth == JNI_TRUE && hasSubject == JNI_TRUE,
+        clockGlass == JNI_TRUE
     );
     atmo::vulkan::setPushConstants(
         halftone->engine,

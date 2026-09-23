@@ -121,6 +121,10 @@ class AdvancedSettingsActivity : ComponentActivity() {
                 AtmosphereClockPolicy.DEPTH_KEY,
                 AtmosphereClockPolicy.DEFAULT_DEPTH
             ),
+            clockAdaptiveEnabled = prefs.readBoolean(
+                AtmosphereClockPolicy.ADAPTIVE_KEY,
+                AtmosphereClockPolicy.DEFAULT_ADAPTIVE
+            ),
             clockOffersScreenChoice = ClockScreenPolicy.offersChoice(activeEffect),
             clockScreenId = resolvedClockScreen.id,
             showNoiseSwitch = showNoiseSwitch,
@@ -284,6 +288,10 @@ class AdvancedSettingsActivity : ComponentActivity() {
                 putBoolean(
                     AtmosphereClockPolicy.DEPTH_KEY,
                     result.clockDepthEnabled
+                )
+                putBoolean(
+                    AtmosphereClockPolicy.ADAPTIVE_KEY,
+                    result.clockAdaptiveEnabled
                 )
                 // Stored raw. Effects that cannot honour a side collapse it on
                 // read (ClockScreenPolicy.resolveScreen), so switching from

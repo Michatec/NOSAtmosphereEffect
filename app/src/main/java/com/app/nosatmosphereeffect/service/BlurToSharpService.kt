@@ -3,10 +3,8 @@ package com.app.nosatmosphereeffect.service
 import android.content.SharedPreferences
 import android.graphics.Bitmap
 import com.app.nosatmosphereeffect.helper.AtmosphereGlassPolicy
-import com.app.nosatmosphereeffect.helper.ClockPreferences
 import com.app.nosatmosphereeffect.helper.GLWallpaperService
 import com.app.nosatmosphereeffect.helper.GlassEffectPreferences
-import com.app.nosatmosphereeffect.helper.PlaylistModeManager
 import com.app.nosatmosphereeffect.renderer.AtmosphereRenderController
 
 class BlurToSharpService :
@@ -56,15 +54,7 @@ class BlurToSharpService :
         // this service's own lockedProgress/unlockedProgress. The controller
         // still takes the flat arguments its forward twin uses, so the shared
         // state object is unpacked here rather than passed through.
-        val clock = ClockPreferences.read(
-            preferences = preferences,
-            effectId = effectId,
-            singleImageMode = !PlaylistModeManager.isPlaylistMode(
-                applicationContext
-            ),
-            lockedProgress = lockedProgress,
-            unlockedProgress = unlockedProgress
-        )
+        val clock = readClockState(preferences)
         renderer.configureClock(clock)
     }
 

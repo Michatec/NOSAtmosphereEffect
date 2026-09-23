@@ -125,6 +125,7 @@ class GlesClockOverlay(
             provider.animateEntry = next.animate
             provider.color = next.color
             provider.hourFormatOverride = next.hourFormatOverride
+            provider.digitFit = next.digitFit
         }
         if (pendingFormatRefresh) {
             pendingFormatRefresh = false
@@ -167,6 +168,7 @@ class GlesClockOverlay(
                 1f,
                 1f
             )
+            GLES30.glUniform1f(GLES30.glGetUniformLocation(programId, "uClockGlass"), 0f)
             GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
             return
         }
@@ -197,6 +199,10 @@ class GlesClockOverlay(
         GLES30.glUniform1f(
             GLES30.glGetUniformLocation(programId, "uClockDepth"),
             if (current.depthEnabled && subjectMaskAvailable) 1f else 0f
+        )
+        GLES30.glUniform1f(
+            GLES30.glGetUniformLocation(programId, "uClockGlass"),
+            if (current.liquidGlass) 1f else 0f
         )
         GLES30.glActiveTexture(textureUnit)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, provider.textureId)

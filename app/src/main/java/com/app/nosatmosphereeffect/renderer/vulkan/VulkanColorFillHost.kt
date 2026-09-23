@@ -518,7 +518,8 @@ internal class VulkanColorFillHost(
                 clockUploaded = state.clock.faceUploaded,
                 // Depth needs a mask, so the user's switch is ANDed with one
                 // existing — the shader must never sample the clear texture.
-                clockDepth = state.clock.depthEnabled && state.hasSubject
+                clockDepth = state.clock.depthEnabled && state.hasSubject,
+                clockGlass = state.clock.liquidGlass
             )
             true
         } catch (failure: Throwable) {

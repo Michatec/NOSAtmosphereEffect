@@ -4,9 +4,7 @@ import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.util.Log
 import com.app.nosatmosphereeffect.helper.CanvasSubjectSettings
-import com.app.nosatmosphereeffect.helper.ClockPreferences
 import com.app.nosatmosphereeffect.helper.GLWallpaperService
-import com.app.nosatmosphereeffect.helper.PlaylistModeManager
 import com.app.nosatmosphereeffect.helper.SubjectIsolationPolicy
 import com.app.nosatmosphereeffect.renderer.ColorFillRenderController
 import com.app.nosatmosphereeffect.renderer.FrostedRenderController
@@ -49,15 +47,7 @@ abstract class ColorFillWallpaperService protected constructor(
         // the clock stays off there — a position calibrated against one photo
         // is wrong for the next. See AtmosphereClockPolicy.resolveEnabled.
         renderer.configureClock(
-            ClockPreferences.read(
-                preferences = preferences,
-                effectId = effectId,
-                singleImageMode = !PlaylistModeManager.isPlaylistMode(
-                    applicationContext
-                ),
-                lockedProgress = lockedProgress,
-                unlockedProgress = unlockedProgress
-            )
+            readClockState(preferences)
         )
     }
 
@@ -133,15 +123,7 @@ abstract class FrostedWallpaperService protected constructor(
         // the clock stays off there — a position calibrated against one photo
         // is wrong for the next. See AtmosphereClockPolicy.resolveEnabled.
         renderer.configureClock(
-            ClockPreferences.read(
-                preferences = preferences,
-                effectId = effectId,
-                singleImageMode = !PlaylistModeManager.isPlaylistMode(
-                    applicationContext
-                ),
-                lockedProgress = lockedProgress,
-                unlockedProgress = unlockedProgress
-            )
+            readClockState(preferences)
         )
     }
 
@@ -227,15 +209,7 @@ abstract class HalftoneWallpaperService protected constructor(
         // the clock stays off there — a position calibrated against one photo
         // is wrong for the next. See AtmosphereClockPolicy.resolveEnabled.
         renderer.configureClock(
-            ClockPreferences.read(
-                preferences = preferences,
-                effectId = effectId,
-                singleImageMode = !PlaylistModeManager.isPlaylistMode(
-                    applicationContext
-                ),
-                lockedProgress = lockedProgress,
-                unlockedProgress = unlockedProgress
-            )
+            readClockState(preferences)
         )
     }
 
@@ -316,15 +290,7 @@ abstract class NeonWallpaperService protected constructor(
         // the clock stays off there — a position calibrated against one photo
         // is wrong for the next. See AtmosphereClockPolicy.resolveEnabled.
         renderer.configureClock(
-            ClockPreferences.read(
-                preferences = preferences,
-                effectId = effectId,
-                singleImageMode = !PlaylistModeManager.isPlaylistMode(
-                    applicationContext
-                ),
-                lockedProgress = lockedProgress,
-                unlockedProgress = unlockedProgress
-            )
+            readClockState(preferences)
         )
     }
 

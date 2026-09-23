@@ -55,6 +55,11 @@ class ClockTextureProvider(context: Context) {
         get() = face.color
         set(value) { face.color = value }
 
+    /** Where the digits may reach; see ClockFaceRenderer.digitFit. */
+    var digitFit: ClockDigitFit?
+        get() = face.digitFit
+        set(value) { face.digitFit = value }
+
     var hourFormatOverride: Boolean?
         get() = face.hourFormatOverride
         set(value) { face.hourFormatOverride = value }

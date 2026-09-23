@@ -3,6 +3,7 @@ package com.app.nosatmosphereeffect.renderer
 import android.content.Context
 import android.graphics.Bitmap
 import android.util.Log
+import com.app.nosatmosphereeffect.helper.ClockDigitFit
 import com.app.nosatmosphereeffect.helper.ClockOverlayState
 import com.app.nosatmosphereeffect.helper.GLWallpaperService
 import com.app.nosatmosphereeffect.helper.WallpaperRenderHost
@@ -107,7 +108,8 @@ class ColorFillRenderController(
         context = appContext,
         workerName = "AtmoClockColorFill",
         onTick = ::onClockTick,
-        onColorResolved = ::onClockColorResolved
+        onColorResolved = ::onClockColorResolved,
+        onLayoutResolved = ::onClockLayoutResolved
     )
 
     fun configureClock(clock: ClockOverlayState) {
@@ -145,6 +147,17 @@ class ColorFillRenderController(
             gl?.onClockTimeChanged()
             vk?.onTimeChanged()
         }
+        requestRenderForClock()
+    }
+
+    /** The adaptive clock's size for this wallpaper became known. */
+    private fun onClockLayoutResolved(fit: ClockDigitFit?) {
+        val snapshot = synchronized(lock) {
+            if (closed || state.clock.digitFit == fit) return
+            state = state.copy(clock = state.clock.copy(digitFit = fit)).sanitized()
+            state
+        }
+        applyState(snapshot)
         requestRenderForClock()
     }
 

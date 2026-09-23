@@ -94,23 +94,29 @@ object ClockScreenPolicy {
      * | GLASS_REVERSE      | reeded glass    | photo           | HOME  |
      * | COLORFILL          | monochrome      | colour          | BOTH  |
      * | COLORFILL_REVERSE  | colour          | monochrome      | BOTH  |
-     * | NEON               | sketch          | photo           | HOME  |
-     * | NEON_REVERSE       | photo           | sketch          | LOCK  |
+     * | NEON               | sketch          | photo           | BOTH  |
+     * | NEON_REVERSE       | photo           | sketch          | BOTH  |
      * | FROSTED            | photo           | blur            | LOCK  |
      * | FROSTED_REVERSE    | blur            | photo           | HOME  |
-     * | HALFTONE           | photo           | halftone dots   | LOCK  |
-     * | HALFTONE_REVERSE   | halftone dots   | photo           | HOME  |
+     * | HALFTONE           | photo           | halftone dots   | BOTH  |
+     * | HALFTONE_REVERSE   | halftone dots   | photo           | BOTH  |
+     *
+     * "Sharp" here means "a clock stays legible and depth composites
+     * correctly", not "the unmodified photo". Sketch and Halftone restyle the
+     * image without moving or softening it, so a clock reads on either side;
+     * and depth restores the effect's own frame over the clock rather than
+     * the raw photo, so it no longer needs the photo side either.
      *
      * Unknown ids fall back to LOCK, which is the conservative answer: a
      * clock that only shows on the lock screen is never worse than wrong.
      */
     fun sharpSide(effectId: String?): ClockSharpSide = when (effectId) {
-        "COLORFILL", "COLORFILL_REVERSE" -> ClockSharpSide.BOTH
+        "COLORFILL", "COLORFILL_REVERSE",
+        "NEON", "NEON_REVERSE",
+        "HALFTONE", "HALFTONE_REVERSE" -> ClockSharpSide.BOTH
         "REVERSE",
         "GLASS_REVERSE",
-        "NEON",
-        "FROSTED_REVERSE",
-        "HALFTONE_REVERSE" -> ClockSharpSide.HOME
+        "FROSTED_REVERSE" -> ClockSharpSide.HOME
         else -> ClockSharpSide.LOCK
     }
 

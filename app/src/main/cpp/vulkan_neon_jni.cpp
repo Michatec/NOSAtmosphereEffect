@@ -242,7 +242,8 @@ Java_com_app_nosatmosphereeffect_renderer_vulkan_VulkanNeonNative_nativeSetState
     jfloat clockTextureAspect,
     jfloat clockOpacity,
     jboolean clockUploaded,
-    jboolean clockDepth
+    jboolean clockDepth,
+    jboolean clockGlass
 ) {
     CanvasHandle* canvas = fromHandle(handle);
     if (canvas == nullptr) return;
@@ -266,7 +267,8 @@ Java_com_app_nosatmosphereeffect_renderer_vulkan_VulkanNeonNative_nativeSetState
         clockTextureAspect,
         clockOpacity,
         clockUploaded == JNI_TRUE,
-        clockDepth == JNI_TRUE
+        clockDepth == JNI_TRUE,
+        clockGlass == JNI_TRUE
     );
     atmo::vulkan::setPushConstants(
         canvas->engine,
