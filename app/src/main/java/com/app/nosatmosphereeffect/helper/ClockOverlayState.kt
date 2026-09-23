@@ -36,6 +36,7 @@ data class ClockOverlayState(
     val depthEnabled: Boolean = AtmosphereClockPolicy.DEFAULT_DEPTH,
     val styleId: String = ClockStyle.DEFAULT.id,
     val showSeconds: Boolean = AtmosphereClockPolicy.DEFAULT_SECONDS,
+    val showDate: Boolean = AtmosphereClockPolicy.DEFAULT_DATE,
     val animate: Boolean = AtmosphereClockPolicy.DEFAULT_ANIMATE,
     val centerX: Float = AtmosphereClockPolicy.DEFAULT_CENTER_X,
     val top: Float = AtmosphereClockPolicy.DEFAULT_TOP,

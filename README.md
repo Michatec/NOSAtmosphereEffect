@@ -72,10 +72,14 @@ If Canvas Sketch cannot find a confident foreground subject, it falls back to sk
 
 Every effect can draw a clock into the wallpaper itself (Advanced Settings → Clock; single-image mode only). **Choose style, position & size** opens a live preview of the clock on your wallpaper. A box is drawn around it: drag inside the box to move the clock, drag a corner to change both dimensions or an edge to change one, and a centre guide lights up when it is exactly centred. There are no size sliders — the box is the size. The clock is also always shown in the wallpaper picker's preview, whichever screen it is set to appear on.
 
-Two faces, both made of glass: the wallpaper shows through the digits, bent at their rounded edges, softly frosted inside and lit along the top.
+Four faces, all made of glass: the wallpaper shows through the digits, bent at their rounded edges, softly frosted inside and lit along the top. The two segment faces are drawn rather than typeset, so their digits are evenly weighted on every device instead of depending on which fonts it ships.
 
 * **Glass:** hours and minutes side by side.
 * **Glass Stacked:** hours above minutes, which goes much larger on a phone.
+* **Glass Segment:** hours above minutes as rounded capsule segments.
+* **Glass Block:** all four digits in one heavy, tightly packed row.
+
+**Show date** puts the day and date above the digits on any of them, in the same glass and the same colour.
 
 * **Depth effect:** Draws the photo's subject back over the clock, so the clock sits behind them, using the same on-device subject model as subject isolation (see above).
 

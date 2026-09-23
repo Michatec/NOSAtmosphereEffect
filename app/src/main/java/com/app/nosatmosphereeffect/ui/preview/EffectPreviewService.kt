@@ -405,6 +405,11 @@ class EffectPreviewService(
                             AtmosphereClockPolicy.SECONDS_KEY,
                             AtmosphereClockPolicy.DEFAULT_SECONDS
                         ),
+                        clockShowDate = previewBoolean(
+                            prefs,
+                            AtmosphereClockPolicy.DATE_KEY,
+                            AtmosphereClockPolicy.DEFAULT_DATE
+                        ),
                         clockAnimate = previewBoolean(
                             prefs,
                             AtmosphereClockPolicy.ANIMATE_KEY,
@@ -718,6 +723,7 @@ class EffectPreviewService(
                 renderer.clockDepthEnabled = value.clockDepthEnabled
                 renderer.clockStyle = value.clockStyle
                 renderer.clockShowSeconds = value.clockShowSeconds
+                renderer.clockShowDate = value.clockShowDate
                 renderer.clockAnimate = value.clockAnimate
                 renderer.clockColor = value.clockColor
                 renderer.clockHourFormat = value.clockHourFormat

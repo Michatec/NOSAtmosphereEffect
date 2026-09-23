@@ -14,6 +14,25 @@ import kotlin.math.max
 import kotlin.math.pow
 
 /**
+ * How a face's digits are produced.
+ *
+ * The glass treatment works from the face's alpha, so a digit can be any
+ * shape that fills one — a typeface glyph or, for the segment faces, drawn
+ * geometry. Drawing them means the heavy, evenly-weighted digits those faces
+ * need do not depend on which fonts a device happens to ship.
+ */
+enum class ClockDigitShape {
+    /** Text, in one of the families Android ships. */
+    TYPEFACE,
+
+    /** Seven capsule segments per digit, with visible gaps between them. */
+    PILL_SEGMENT,
+
+    /** Seven near-square segments, thick and tightly packed. */
+    BLOCK_SEGMENT
+}
+
+/**
  * The selectable clock faces.
  *
  * Every style is built from a typeface family that ships with Android
@@ -69,7 +88,23 @@ enum class ClockStyle(
      * the shape, so it is drawn without a drop shadow — a shadow would read
      * as frosted glass outside the digits.
      */
-    val liquidGlass: Boolean = false
+    val liquidGlass: Boolean = false,
+    /** Typeface glyphs, or drawn segments — see [ClockDigitShape]. */
+    val digitShape: ClockDigitShape = ClockDigitShape.TYPEFACE,
+    /**
+     * Whether an inline face puts a ":" between hours and minutes. The
+     * segment faces do not: a colon has no segment form, and the references
+     * they are drawn from run the digits together.
+     */
+    val usesSeparator: Boolean = true,
+    /** Segment faces: one digit's width as a fraction of its height. */
+    val segmentAspect: Float = 0.66f,
+    /** Segment faces: stroke thickness as a fraction of the digit's height. */
+    val segmentThickness: Float = 0.24f,
+    /** Segment faces: 0 leaves the segments square, 1 makes them capsules. */
+    val segmentRounding: Float = 1f,
+    /** Segment faces: space between digits as a fraction of their height. */
+    val segmentGap: Float = 0.12f
 ) {
     /**
      * Hours and minutes side by side. Ids are kept as "liquid_glass" so the
@@ -110,7 +145,59 @@ enum class ClockStyle(
         verticalStretch = 1.48f,
         horizontalScale = 0.98f,
         liquidGlass = true
+    ),
+
+    /**
+     * Hours over minutes as capsule segments, the shape a segment display
+     * takes when its elements are fully rounded.
+     */
+    GLASS_SEGMENT(
+        id = "glass_segment",
+        label = "Glass Segment",
+        description = "Rounded segment digits, hours above minutes",
+        familyName = "sans-serif-black",
+        weight = 900,
+        letterSpacingEm = 0f,
+        stacked = true,
+        separatorAlpha = 0f,
+        verticalStretch = 1f,
+        horizontalScale = 1f,
+        liquidGlass = true,
+        digitShape = ClockDigitShape.PILL_SEGMENT,
+        usesSeparator = false,
+        segmentAspect = 0.70f,
+        segmentThickness = 0.235f,
+        segmentRounding = 1f,
+        segmentGap = 0.16f
+    ),
+
+    /**
+     * All four digits in one row, drawn thick and tight so they read as a
+     * single band across the wallpaper.
+     */
+    GLASS_BLOCK(
+        id = "glass_block",
+        label = "Glass Block",
+        description = "Heavy segment digits in one row",
+        familyName = "sans-serif-black",
+        weight = 900,
+        letterSpacingEm = 0f,
+        stacked = false,
+        separatorAlpha = 0f,
+        verticalStretch = 1f,
+        horizontalScale = 1f,
+        liquidGlass = true,
+        digitShape = ClockDigitShape.BLOCK_SEGMENT,
+        usesSeparator = false,
+        segmentAspect = 0.78f,
+        segmentThickness = 0.30f,
+        segmentRounding = 0.16f,
+        segmentGap = 0.035f
     );
+
+    /** True when this face's digits are drawn rather than typeset. */
+    val drawsSegments: Boolean
+        get() = digitShape != ClockDigitShape.TYPEFACE
 
     fun typeface(): Typeface {
         return try {
@@ -186,6 +273,15 @@ class ClockFaceRenderer(private val context: Context) {
             }
         }
 
+    /** Draws the day and date above the digits, as the lock screen does. */
+    var showDate: Boolean = false
+        set(value) {
+            if (field != value) {
+                field = value
+                invalidateLayout()
+            }
+        }
+
     /**
      * Colour the glyphs are drawn in, already resolved (never
      * [ClockPalette.AUTO]). Changing it only needs a redraw, not a relayout.
@@ -253,6 +349,19 @@ class ClockFaceRenderer(private val context: Context) {
         color = Color.WHITE
         textAlign = Paint.Align.LEFT
     }
+
+    /** The date line; a typeface even on the segment faces, which have no letters. */
+    private val datePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textAlign = Paint.Align.LEFT
+    }
+
+    private val segmentRect = android.graphics.RectF()
+
+    // Kept rather than rebuilt per frame: the pattern lookup and the parse
+    // behind SimpleDateFormat are not free, and this runs on the render path.
+    private var dateFormatter: java.text.SimpleDateFormat? = null
+    private var dateFormatterLocale: java.util.Locale? = null
 
     private val calendar: Calendar = Calendar.getInstance()
 
@@ -361,7 +470,7 @@ class ClockFaceRenderer(private val context: Context) {
         if (currentRows.isEmpty()) previousRows = rows
         currentRows = rows
 
-        val face = ensureLayout(rows)
+        val face = ensureLayout(rows, dateText(nowMillis))
         val target = ensureBitmap(face) ?: return null
         val target2d = canvas ?: return null
 
@@ -382,15 +491,26 @@ class ClockFaceRenderer(private val context: Context) {
      * to keep empty padding clear of the subject.
      */
     fun measureFace(nowMillis: Long): ClockFaceBox {
-        val face = ensureLayout(formatRows(nowMillis))
+        val face = ensureLayout(formatRows(nowMillis), dateText(nowMillis))
         val bitmapWidth = face.contentWidth + face.paddingX * 2f
         val bitmapHeight = face.contentHeight + face.paddingY * 2f
-        val bounds = android.graphics.Rect()
-        textPaint.getTextBounds(DIGITS_SAMPLE, 0, DIGITS_SAMPLE.length, bounds)
-        val glyphTop = face.paddingY +
-            face.rowBaselines.first() + bounds.top * face.verticalStretch
-        val glyphBottom = face.paddingY +
-            face.rowBaselines.last() + bounds.bottom * face.verticalStretch
+        val glyphTop: Float
+        val glyphBottom: Float
+        if (face.drawn) {
+            glyphTop = face.paddingY
+            glyphBottom = face.paddingY + face.contentHeight
+        } else {
+            val bounds = android.graphics.Rect()
+            textPaint.getTextBounds(DIGITS_SAMPLE, 0, DIGITS_SAMPLE.length, bounds)
+            // The date, when shown, is the top of what is visible.
+            glyphTop = if (face.dateText != null) {
+                face.paddingY
+            } else {
+                face.paddingY + face.rowBaselines.first() + bounds.top * face.verticalStretch
+            }
+            glyphBottom = face.paddingY +
+                face.rowBaselines.last() + bounds.bottom * face.verticalStretch
+        }
         return ClockFaceBox(
             aspect = bitmapWidth / bitmapHeight,
             left = face.paddingX / bitmapWidth,
@@ -437,6 +557,7 @@ class ClockFaceRenderer(private val context: Context) {
     private fun drawFace(target: Canvas, face: FaceLayout, uptimeMs: Long) {
         val progress = transitionProgress(uptimeMs)
         val entry = entryProgress(uptimeMs)
+        drawDate(target, face, entry)
         val rowCount = face.rows.size
         // Slots are staggered across the whole face, not per row, so a
         // stacked clock cascades down as well as across instead of both rows
@@ -520,6 +641,77 @@ class ClockFaceRenderer(private val context: Context) {
         }
     }
 
+    private fun scaleX(scale: Float, entryScale: Float): Float = scale * entryScale
+
+    /** The day and date line, centred above the digits. */
+    private fun drawDate(target: Canvas, face: FaceLayout, entry: Float?) {
+        val text = face.dateText ?: return
+        // Arrives with the first glyph rather than on its own schedule, so the
+        // face reads as one thing coming into place.
+        val alpha = entry?.let { easeOutCubic((staggeredEntry(it, 0) * 1.35f).coerceAtMost(1f)) }
+            ?: 1f
+        if (alpha <= 0.004f) return
+        datePaint.color = color
+        datePaint.alpha = (alpha * DATE_OPACITY * 255f).toInt().coerceIn(0, 255)
+        val width = datePaint.measureText(text)
+        target.drawText(
+            text,
+            face.paddingX + (face.contentWidth - width) / 2f,
+            face.paddingY + face.dateBaseline,
+            datePaint
+        )
+    }
+
+    /**
+     * One drawn digit: seven segments in a box, the shape a segment display
+     * makes. [top] is the box's top edge, not a baseline.
+     */
+    private fun drawSegmentDigit(
+        target: Canvas,
+        character: Char,
+        centerX: Float,
+        top: Float,
+        face: FaceLayout
+    ) {
+        val segments = SEGMENTS[character] ?: return
+        val height = face.rowHeight
+        val width = face.digitWidth
+        val thickness = height * style.segmentThickness
+        val radius = thickness / 2f * style.segmentRounding
+        val inset = thickness * SEGMENT_INSET
+        val left = centerX - width / 2f
+        val right = centerX + width / 2f
+        val middle = top + height / 2f
+
+        fun bar(l: Float, t: Float, r: Float, b: Float) {
+            if (r <= l || b <= t) return
+            segmentRect.set(l, t, r, b)
+            target.drawRoundRect(segmentRect, radius, radius, textPaint)
+        }
+
+        if (segments and SEGMENT_A != 0) {
+            bar(left + inset, top, right - inset, top + thickness)
+        }
+        if (segments and SEGMENT_G != 0) {
+            bar(left + inset, middle - thickness / 2f, right - inset, middle + thickness / 2f)
+        }
+        if (segments and SEGMENT_D != 0) {
+            bar(left + inset, top + height - thickness, right - inset, top + height)
+        }
+        if (segments and SEGMENT_F != 0) {
+            bar(left, top + inset, left + thickness, middle - inset)
+        }
+        if (segments and SEGMENT_B != 0) {
+            bar(right - thickness, top + inset, right, middle - inset)
+        }
+        if (segments and SEGMENT_E != 0) {
+            bar(left, middle + inset, left + thickness, top + height - inset)
+        }
+        if (segments and SEGMENT_C != 0) {
+            bar(right - thickness, middle + inset, right, top + height - inset)
+        }
+    }
+
     /**
      * [entry] is this slot's own entry progress, 0..1, or null when no entry
      * animation is running. It composes multiplicatively with whatever the
@@ -578,6 +770,18 @@ class ClockFaceRenderer(private val context: Context) {
             )
         }
 
+        if (face.drawn) {
+            // The drawn digits share the animation transforms below, so the
+            // entry and the digit change look identical on every face.
+            val scaleY = scale * entryScale
+            target.save()
+            target.translate(0f, offsetY + entryRise)
+            target.scale(scaleX(scale, entryScale), scaleY, centerX, baseline + face.rowHeight / 2f)
+            drawSegmentDigit(target, character, centerX, baseline, face)
+            target.restore()
+            return
+        }
+
         val text = character.toString()
         val glyphWidth = textPaint.measureText(text)
         val scaleX = scale * entryScale
@@ -606,9 +810,9 @@ class ClockFaceRenderer(private val context: Context) {
         invalidate()
     }
 
-    private fun ensureLayout(rows: List<String>): FaceLayout {
+    private fun ensureLayout(rows: List<String>, dateText: String?): FaceLayout {
         val existing = layout
-        if (existing != null && existing.matches(rows)) return existing
+        if (existing != null && existing.matches(rows, dateText)) return existing
 
         textPaint.typeface = style.typeface()
         textPaint.textSize = TEXT_SIZE_PX
@@ -618,18 +822,25 @@ class ClockFaceRenderer(private val context: Context) {
         textPaint.textScaleX = style.horizontalScale
         textPaint.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT)
 
-        // Slot width is the widest digit, so the layout never reflows.
+        val drawn = style.drawsSegments
+        // Slot width is the widest digit, so the layout never reflows. Drawn
+        // digits are all one size by construction.
         var digitAdvance = 0f
-        for (digit in '0'..'9') {
-            digitAdvance = max(digitAdvance, textPaint.measureText(digit.toString()))
+        if (drawn) {
+            digitAdvance = TEXT_SIZE_PX * (style.segmentAspect + style.segmentGap)
+        } else {
+            for (digit in '0'..'9') {
+                digitAdvance = max(digitAdvance, textPaint.measureText(digit.toString()))
+            }
         }
-        val separatorAdvance = textPaint.measureText(":")
+        val separatorAdvance = if (drawn) 0f else textPaint.measureText(":")
 
         val stretch = style.verticalStretch
         val metrics = textPaint.fontMetrics
         // Glyphs are scaled about their baseline, so the ascent and descent
         // both grow by the stretch factor and the row box grows with them.
-        val rowHeight = (metrics.bottom - metrics.top) * stretch
+        // A drawn digit's box is exactly its height.
+        val rowHeight = if (drawn) TEXT_SIZE_PX else (metrics.bottom - metrics.top) * stretch
         val rowLayouts = rows.map { rowText ->
             val slots = rowText.map { character ->
                 Slot(
@@ -639,9 +850,36 @@ class ClockFaceRenderer(private val context: Context) {
             RowLayout(slots = slots, width = slots.sumOf { it.advance.toDouble() }.toFloat())
         }
 
-        val contentWidth = rowLayouts.maxOfOrNull { it.width } ?: digitAdvance
-        val rowSpacing = if (rows.size > 1) TEXT_SIZE_PX * ROW_SPACING_EM else 0f
-        val contentHeight = rowHeight * rows.size + rowSpacing * (rows.size - 1)
+        // The trailing gap is trimmed so the drawn faces sit tight in their box.
+        val digitsWidth = (rowLayouts.maxOfOrNull { it.width } ?: digitAdvance) -
+            if (drawn) TEXT_SIZE_PX * style.segmentGap else 0f
+        val rowSpacing = if (rows.size > 1) {
+            TEXT_SIZE_PX * if (drawn) SEGMENT_ROW_SPACING_EM else ROW_SPACING_EM
+        } else {
+            0f
+        }
+
+        // The date sits above the digits, in the same colour and the same
+        // texture, so it takes the glass treatment and the user's size and
+        // placement with no separate plumbing.
+        // Heavier and larger than a lock screen would set it: the glass bevel
+        // is measured in texels of this bitmap, so a hairline date would be
+        // all edge and no body once the shader has finished with it.
+        datePaint.typeface = Typeface.create(
+            Typeface.create("sans-serif-medium", Typeface.NORMAL),
+            600,
+            false
+        )
+        datePaint.textSize = TEXT_SIZE_PX * DATE_SIZE_EM
+        datePaint.letterSpacing = DATE_TRACKING_EM
+        val dateMetrics = datePaint.fontMetrics
+        val dateHeight = if (dateText == null) 0f else dateMetrics.bottom - dateMetrics.top
+        val dateGap = if (dateText == null) 0f else TEXT_SIZE_PX * DATE_GAP_EM
+        val dateWidth = if (dateText == null) 0f else datePaint.measureText(dateText)
+
+        val contentWidth = max(digitsWidth, dateWidth)
+        val digitsHeight = rowHeight * rows.size + rowSpacing * (rows.size - 1)
+        val contentHeight = digitsHeight + dateHeight + dateGap
 
         // Padding leaves room for whichever animation travels furthest, plus
         // the bloomed shadow and the scale overshoot, so a glyph mid-flight
@@ -662,9 +900,13 @@ class ClockFaceRenderer(private val context: Context) {
             (travelEm + (bloomedShadowEm + OVERSHOOT_MARGIN_EM) * stretch)
         val paddingX = TEXT_SIZE_PX * (bloomedShadowEm + OVERSHOOT_MARGIN_EM)
 
+        // Drawn digits have no baseline, so this holds the top of the row for
+        // them and the text baseline for the typeface faces.
+        val digitsTop = dateHeight + dateGap
         val baselines = FloatArray(rows.size)
         for (index in rows.indices) {
-            baselines[index] = (rowHeight + rowSpacing) * index - metrics.top * stretch
+            baselines[index] = digitsTop + (rowHeight + rowSpacing) * index +
+                if (drawn) 0f else -metrics.top * stretch
         }
 
         val face = FaceLayout(
@@ -675,6 +917,11 @@ class ClockFaceRenderer(private val context: Context) {
             contentHeight = contentHeight,
             rowHeight = rowHeight,
             rowSpacing = rowSpacing,
+            drawn = drawn,
+            digitWidth = TEXT_SIZE_PX * style.segmentAspect * style.horizontalScale,
+            dateText = dateText,
+            dateBaseline = -dateMetrics.top,
+            dateHeight = dateHeight,
             paddingX = paddingX,
             paddingY = paddingY,
             textSize = TEXT_SIZE_PX,
@@ -746,16 +993,39 @@ class ClockFaceRenderer(private val context: Context) {
                 listOf(hourText, minuteText)
             }
         } else {
+            val separator = if (style.usesSeparator) ":" else ""
             val single = buildString {
                 append(hourText)
-                append(':')
+                append(separator)
                 append(minuteText)
                 if (showSeconds) {
-                    append(':')
+                    append(separator)
                     append(twoDigits(second))
                 }
             }
             listOf(single)
+        }
+    }
+
+    /** "Fri, 25 Oct" in the device's locale, or null when the date is off. */
+    private fun dateText(nowMillis: Long): String? {
+        if (!showDate) return null
+        val locale = java.util.Locale.getDefault()
+        val formatter = dateFormatter?.takeIf { dateFormatterLocale == locale } ?: try {
+            java.text.SimpleDateFormat(
+                DateFormat.getBestDateTimePattern(locale, DATE_SKELETON),
+                locale
+            ).also {
+                dateFormatter = it
+                dateFormatterLocale = locale
+            }
+        } catch (_: RuntimeException) {
+            return null
+        }
+        return try {
+            formatter.format(java.util.Date(nowMillis))
+        } catch (_: RuntimeException) {
+            null
         }
     }
 
@@ -863,6 +1133,11 @@ class ClockFaceRenderer(private val context: Context) {
         val contentHeight: Float,
         val rowHeight: Float,
         val rowSpacing: Float,
+        val drawn: Boolean,
+        val digitWidth: Float,
+        val dateText: String?,
+        val dateBaseline: Float,
+        val dateHeight: Float,
         val paddingX: Float,
         val paddingY: Float,
         val textSize: Float,
@@ -874,7 +1149,9 @@ class ClockFaceRenderer(private val context: Context) {
          * "9:41" and "10:41" do not, because the 12-hour hour field grows a
          * digit at ten o'clock.
          */
-        fun matches(candidate: List<String>): Boolean {
+        fun matches(candidate: List<String>, candidateDate: String?): Boolean {
+            // The date is part of the shape: its width decides the texture's.
+            if (dateText != candidateDate) return false
             if (candidate.size != rowTexts.size) return false
             for (index in candidate.indices) {
                 val existing = rowTexts[index]
@@ -905,6 +1182,44 @@ class ClockFaceRenderer(private val context: Context) {
          */
         const val TEXT_SIZE_PX = 280f
         const val ROW_SPACING_EM = 0.04f
+        /** Segment rows sit closer: their boxes have no ascent slack. */
+        const val SEGMENT_ROW_SPACING_EM = 0.14f
+        const val DATE_SIZE_EM = 0.20f
+        const val DATE_GAP_EM = 0.13f
+        const val DATE_TRACKING_EM = 0.02f
+        /** Gap between neighbouring segments, as a fraction of their thickness. */
+        const val SEGMENT_INSET = 0.22f
+        const val DATE_OPACITY = 0.88f
+        const val DATE_SKELETON = "EEEdMMM"
+
+        const val SEGMENT_A = 1
+        const val SEGMENT_B = 2
+        const val SEGMENT_C = 4
+        const val SEGMENT_D = 8
+        const val SEGMENT_E = 16
+        const val SEGMENT_F = 32
+        const val SEGMENT_G = 64
+
+        /** Which segments each digit lights, in the usual seven-segment order. */
+        val SEGMENTS: Map<Char, Int> = mapOf(
+            '0' to (SEGMENT_A or SEGMENT_B or SEGMENT_C or SEGMENT_D or SEGMENT_E or SEGMENT_F),
+            '1' to (SEGMENT_B or SEGMENT_C),
+            '2' to (SEGMENT_A or SEGMENT_B or SEGMENT_G or SEGMENT_E or SEGMENT_D),
+            '3' to (SEGMENT_A or SEGMENT_B or SEGMENT_G or SEGMENT_C or SEGMENT_D),
+            '4' to (SEGMENT_F or SEGMENT_G or SEGMENT_B or SEGMENT_C),
+            '5' to (SEGMENT_A or SEGMENT_F or SEGMENT_G or SEGMENT_C or SEGMENT_D),
+            '6' to (
+                SEGMENT_A or SEGMENT_F or SEGMENT_G or SEGMENT_E or SEGMENT_C or SEGMENT_D
+                ),
+            '7' to (SEGMENT_A or SEGMENT_B or SEGMENT_C),
+            '8' to (
+                SEGMENT_A or SEGMENT_B or SEGMENT_C or SEGMENT_D or
+                    SEGMENT_E or SEGMENT_F or SEGMENT_G
+                ),
+            '9' to (
+                SEGMENT_A or SEGMENT_B or SEGMENT_C or SEGMENT_D or SEGMENT_F or SEGMENT_G
+                )
+        )
         const val SHADOW_RADIUS_EM = 0.085f
         const val SHADOW_DY_EM = 0.022f
         const val TRANSITION_DURATION_MS = 520L

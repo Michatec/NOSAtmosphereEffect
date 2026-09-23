@@ -294,21 +294,42 @@ class ClockFaceGeometryTest {
         // where a clock should be.
         ClockStyle.entries.forEach { style ->
             assertTrue(
-                "${style.id} should be stretched vertically",
-                style.verticalStretch >= 1.3f
-            )
-            assertTrue(
-                "${style.id} should not be stretched past legibility",
-                style.verticalStretch <= 2.2f
+                "${style.id} should be a glass face",
+                style.liquidGlass
             )
             assertTrue(
                 "${style.id} has an out-of-range horizontal scale",
                 style.horizontalScale in 0.8f..1f
             )
-            assertTrue(
-                "${style.id} should be a glass face",
-                style.liquidGlass
-            )
+            if (style.drawsSegments) {
+                // Drawn faces get their proportions from their segments, not
+                // from a typeface, so the stretch bounds do not apply.
+                assertTrue(
+                    "${style.id} has an unusable digit aspect",
+                    style.segmentAspect in 0.3f..1.2f
+                )
+                assertTrue(
+                    "${style.id} segments are too thin or too thick to read",
+                    style.segmentThickness in 0.1f..0.4f
+                )
+                assertTrue(
+                    "${style.id} has an out-of-range segment rounding",
+                    style.segmentRounding in 0f..1f
+                )
+                assertTrue(
+                    "${style.id} has a negative gap between digits",
+                    style.segmentGap >= 0f
+                )
+            } else {
+                assertTrue(
+                    "${style.id} should be stretched vertically",
+                    style.verticalStretch >= 1.3f
+                )
+                assertTrue(
+                    "${style.id} should not be stretched past legibility",
+                    style.verticalStretch <= 2.2f
+                )
+            }
         }
     }
 
@@ -327,12 +348,36 @@ class ClockFaceGeometryTest {
     }
 
     @Test
+    fun `segment faces run their digits together`() {
+        // A colon has no segment form, so a separator would reserve a slot
+        // that draws nothing and leave a gap mid-clock.
+        ClockStyle.entries.filter { it.drawsSegments }.forEach { style ->
+            assertTrue("${style.id} must not use a separator", !style.usesSeparator)
+        }
+        assertTrue(
+            "the typeface faces should keep their colon",
+            ClockStyle.entries.filter { !it.drawsSegments }.all { it.stacked || it.usesSeparator }
+        )
+    }
+
+    @Test
+    fun `both segment faces are offered`() {
+        val drawn = ClockStyle.entries.filter { it.drawsSegments }.map { it.id }
+        assertEquals(listOf("glass_segment", "glass_block"), drawn)
+    }
+
+    @Test
     fun `style ids are unique and stable`() {
         val ids = ClockStyle.entries.map { it.id }
         assertEquals(ids.size, ids.toSet().size)
         // Stored in preferences, so renaming one silently resets everyone
         // using it back to the default.
-        listOf("liquid_glass", "liquid_glass_stacked").forEach { id ->
+        listOf(
+            "liquid_glass",
+            "liquid_glass_stacked",
+            "glass_segment",
+            "glass_block"
+        ).forEach { id ->
             assertEquals(id, ClockStyle.fromId(id).id)
         }
         // The faces this set replaced fall back to the default rather than

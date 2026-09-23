@@ -28,6 +28,8 @@ object AtmosphereClockPolicy {
     const val DEPTH_KEY = "atmosphere_clock_depth"
     const val STYLE_KEY = "atmosphere_clock_style"
     const val SECONDS_KEY = "atmosphere_clock_seconds"
+    /** Draws the day and date above the digits, as the lock screen does. */
+    const val DATE_KEY = "atmosphere_clock_date"
     const val ANIMATE_KEY = "atmosphere_clock_animate"
     const val CENTER_X_KEY = "atmosphere_clock_center_x"
     const val TOP_KEY = "atmosphere_clock_top"
@@ -79,6 +81,7 @@ object AtmosphereClockPolicy {
     const val DEFAULT_OPACITY = 1f
     const val DEFAULT_DEPTH = true
     const val DEFAULT_SECONDS = false
+    const val DEFAULT_DATE = false
     const val DEFAULT_ANIMATE = true
     const val DEFAULT_COLOR = ClockPalette.AUTO
     const val HOUR_FORMAT_SYSTEM = "system"
@@ -111,6 +114,7 @@ object AtmosphereClockPolicy {
         DEPTH_KEY,
         STYLE_KEY,
         SECONDS_KEY,
+        DATE_KEY,
         ANIMATE_KEY,
         COLOR_KEY,
         HOUR_FORMAT_KEY,
