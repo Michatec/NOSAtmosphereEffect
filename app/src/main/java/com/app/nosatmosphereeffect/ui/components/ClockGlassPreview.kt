@@ -55,6 +55,27 @@ internal fun ClockGlassPreview(
     // and draggable, which is the whole point of this screen.
     val shader = remember { runCatching { RuntimeShader(GLASS_AGSL) }.getOrNull() }
     val paint = remember { Paint() }
+    val photo = wallpaper?.takeIf { !it.isRecycled }
+    val glyphs = face?.takeIf { !it.isRecycled && it.width > 0 && it.height > 0 }
+    // Built per bitmap rather than per frame, and sampled linearly: the face
+    // is scaled down into the box, and point sampling made the digits ragged
+    // where the wallpaper's own sampler makes them smooth.
+    val wallpaperShader = remember(photo) {
+        photo?.let {
+            BitmapShader(it, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply {
+                filterMode = BitmapShader.FILTER_MODE_LINEAR
+            }
+        }
+    }
+    val faceShader = remember(glyphs) {
+        glyphs?.let {
+            BitmapShader(it, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply {
+                filterMode = BitmapShader.FILTER_MODE_LINEAR
+            }
+        }
+    }
+    val wallpaperMatrix = remember { Matrix() }
+    val faceMatrix = remember { Matrix() }
 
     Canvas(modifier) {
         val viewWidth = size.width
@@ -65,80 +86,89 @@ internal fun ClockGlassPreview(
         @Suppress("UNUSED_EXPRESSION")
         faceRevision
 
-        val photo = wallpaper?.takeIf { !it.isRecycled }
-        if (photo == null) {
+        if (photo == null || wallpaperShader == null) {
             drawRect(color = Color.Black)
             return@Canvas
         }
 
-        val wallpaperShader = BitmapShader(photo, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
         // Centre-crop, the way the wallpaper itself is fitted.
         val scale = max(viewWidth / photo.width, viewHeight / photo.height)
-        wallpaperShader.setLocalMatrix(
-            Matrix().apply {
-                setScale(scale, scale)
-                postTranslate(
-                    (viewWidth - photo.width * scale) / 2f,
-                    (viewHeight - photo.height * scale) / 2f
-                )
-            }
+        wallpaperMatrix.setScale(scale, scale)
+        wallpaperMatrix.postTranslate(
+            (viewWidth - photo.width * scale) / 2f,
+            (viewHeight - photo.height * scale) / 2f
         )
+        wallpaperShader.setLocalMatrix(wallpaperMatrix)
 
-        val glyphs = face?.takeIf { !it.isRecycled && it.width > 0 && it.height > 0 }
-        if (shader == null) {
+        val boxLeft = box.left * viewWidth
+        val boxTop = box.top * viewHeight
+        val boxWidth = box.width * viewWidth
+        val boxHeight = box.height * viewHeight
+        val drawGlass = shader != null &&
+            faceShader != null &&
+            glyphs != null &&
+            boxWidth > 1f &&
+            boxHeight > 1f &&
+            opacity > 0f
+
+        if (!drawGlass) {
             paint.shader = wallpaperShader
             drawIntoCanvas { it.nativeCanvas.drawRect(0f, 0f, viewWidth, viewHeight, paint) }
-            if (glyphs != null && opacity > 0f) {
+            // Without the runtime shader the glass cannot be drawn, but the
+            // clock still has to be visible to be positioned.
+            if (shader == null && glyphs != null && opacity > 0f && boxWidth > 1f) {
                 drawImage(
                     image = glyphs.asImageBitmap(),
-                    dstOffset = IntOffset(
-                        (box.left * viewWidth).toInt(),
-                        (box.top * viewHeight).toInt()
-                    ),
+                    dstOffset = IntOffset(boxLeft.toInt(), boxTop.toInt()),
                     dstSize = IntSize(
-                        (box.width * viewWidth).toInt().coerceAtLeast(1),
-                        (box.height * viewHeight).toInt().coerceAtLeast(1)
+                        boxWidth.toInt().coerceAtLeast(1),
+                        boxHeight.toInt().coerceAtLeast(1)
                     ),
                     alpha = opacity.coerceIn(0f, 1f)
                 )
             }
             return@Canvas
         }
-        val boxLeft = box.left * viewWidth
-        val boxTop = box.top * viewHeight
-        val boxWidth = box.width * viewWidth
-        val boxHeight = box.height * viewHeight
-        if (glyphs == null || boxWidth <= 1f || boxHeight <= 1f || opacity <= 0f) {
-            paint.shader = wallpaperShader
-            drawIntoCanvas { it.nativeCanvas.drawRect(0f, 0f, viewWidth, viewHeight, paint) }
-            return@Canvas
-        }
+        checkNotNull(shader)
+        checkNotNull(faceShader)
+        checkNotNull(glyphs)
 
-        val faceShader = BitmapShader(glyphs, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
-        faceShader.setLocalMatrix(
-            Matrix().apply {
-                setScale(boxWidth / glyphs.width, boxHeight / glyphs.height)
-                postTranslate(boxLeft, boxTop)
-            }
-        )
+        faceMatrix.setScale(boxWidth / glyphs.width, boxHeight / glyphs.height)
+        faceMatrix.postTranslate(boxLeft, boxTop)
+        faceShader.setLocalMatrix(faceMatrix)
 
         shader.setInputShader("wallpaper", wallpaperShader)
         shader.setInputShader("face", faceShader)
         shader.setFloatUniform("boxOrigin", boxLeft, boxTop)
         shader.setFloatUniform("boxSize", boxWidth, boxHeight)
-        // The bevel and the refraction scale with the clock, so a big clock is
-        // not a small one with thin edges.
-        shader.setFloatUniform("bevel", max(2f, boxHeight * BEVEL_FRACTION))
-        shader.setFloatUniform("refraction", boxHeight * REFRACTION_FRACTION)
-        shader.setFloatUniform("frost", max(1f, viewHeight * FROST_FRACTION))
+        // Measured in face-texture texels, exactly as the wallpaper shader
+        // does it, so the bevel is the same width on the same clock rather
+        // than a fraction of the box (which made it far softer here).
+        shader.setFloatUniform(
+            "bevel",
+            (BEVEL_TEXELS * boxHeight / glyphs.height).coerceAtLeast(1f)
+        )
+        // The wallpaper offsets in texture UV, where x spans the width and y
+        // the height, so the same UV step is fewer pixels across than down.
+        val refraction = REFRACTION_FRACTION * boxHeight
+        shader.setFloatUniform(
+            "refraction",
+            refraction * viewWidth / viewHeight,
+            refraction
+        )
+        shader.setFloatUniform(
+            "frost",
+            FROST_FRACTION * viewWidth,
+            FROST_FRACTION * viewHeight
+        )
         shader.setFloatUniform("opacity", opacity.coerceIn(0f, 1f))
         paint.shader = shader
         drawIntoCanvas { it.nativeCanvas.drawRect(0f, 0f, viewWidth, viewHeight, paint) }
     }
 }
 
-/** Fractions of the clock's height / the screen height; see the effect shaders. */
-private const val BEVEL_FRACTION = 0.035f
+/** The bevel width in face-texture texels; the effect shaders use the same 9. */
+private const val BEVEL_TEXELS = 9f
 private const val REFRACTION_FRACTION = 0.11f
 private const val FROST_FRACTION = 0.0032f
 
@@ -148,8 +178,8 @@ uniform shader face;
 uniform float2 boxOrigin;
 uniform float2 boxSize;
 uniform float bevel;
-uniform float refraction;
-uniform float frost;
+uniform float2 refraction;
+uniform float2 frost;
 uniform float opacity;
 
 half4 main(float2 coord) {
@@ -177,10 +207,10 @@ half4 main(float2 coord) {
     float2 at = coord - slope * refraction;
     float3 refracted = (
         2.0 * float3(wallpaper.eval(at).rgb) +
-        float3(wallpaper.eval(at + float2(frost, 0.0)).rgb) +
-        float3(wallpaper.eval(at - float2(frost, 0.0)).rgb) +
-        float3(wallpaper.eval(at + float2(0.0, frost)).rgb) +
-        float3(wallpaper.eval(at - float2(0.0, frost)).rgb)
+        float3(wallpaper.eval(at + float2(frost.x, 0.0)).rgb) +
+        float3(wallpaper.eval(at - float2(frost.x, 0.0)).rgb) +
+        float3(wallpaper.eval(at + float2(0.0, frost.y)).rgb) +
+        float3(wallpaper.eval(at - float2(0.0, frost.y)).rgb)
     ) / 6.0;
 
     // Light from the upper left (y grows downwards).

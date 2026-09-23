@@ -94,7 +94,6 @@ internal class VulkanClockOverlay(
             uploader.animateEntry = next.animate
             uploader.color = next.color
             uploader.hourFormatOverride = next.hourFormatOverride
-            uploader.digitFit = next.digitFit
         }
         if (pendingFormatRefresh) {
             pendingFormatRefresh = false

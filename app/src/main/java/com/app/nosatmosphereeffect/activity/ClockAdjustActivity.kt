@@ -89,9 +89,6 @@ import android.os.SystemClock
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.ui.geometry.Rect
-import com.app.nosatmosphereeffect.helper.ClockAdaptiveLayout
-import com.app.nosatmosphereeffect.helper.ClockSubjectLayout
-import com.app.nosatmosphereeffect.helper.SubjectProfile
 import com.app.nosatmosphereeffect.ui.components.ClockBoxHandle
 import com.app.nosatmosphereeffect.ui.components.ClockBoxOverlay
 import com.app.nosatmosphereeffect.ui.components.ClockGlassPreview
@@ -343,23 +340,6 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
         onDispose { faceRenderer.release() }
     }
 
-    val adaptiveEnabled = remember {
-        prefs.getBoolean(
-            AtmosphereClockPolicy.ADAPTIVE_KEY,
-            AtmosphereClockPolicy.DEFAULT_ADAPTIVE
-        )
-    }
-    var subjectProfile by remember { mutableStateOf<SubjectProfile?>(null) }
-    var subjectChecked by remember { mutableStateOf(false) }
-    LaunchedEffect(adaptiveEnabled) {
-        if (!adaptiveEnabled) {
-            subjectChecked = true
-            return@LaunchedEffect
-        }
-        subjectProfile = withContext(Dispatchers.IO) { ClockSubjectLayout.compute(context) }
-        subjectChecked = true
-    }
-
     val resolvedColor = ClockPalette.resolve(colorPref, autoColor)
     val screenAspect = if (containerHeightPx > 0f) containerWidthPx / containerHeightPx else 0.5f
     // The box: height is the stored fraction, width follows from the face's
@@ -388,28 +368,9 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
         bottom = box.top + faceContent.bottom * box.height
     )
 
-    val digitFit = remember(subjectProfile, centerX, top, boxHeight, boxWidth, adaptiveEnabled) {
-        if (!adaptiveEnabled) {
-            null
-        } else {
-            subjectProfile?.let { profile ->
-                ClockAdaptiveLayout.digitFit(
-                    profile = profile,
-                    centerX = centerX,
-                    boxTop = top,
-                    boxHeight = boxHeight,
-                    boxWidth = boxWidth
-                )
-            }
-        }
-    }
-
-    // One coroutine owns the renderer. It is keyed on the settings that change
-    // the face's shape, and reads the adaptive fit and the drag state through
-    // rememberUpdatedState instead — restarting the loop on every frame of a
-    // drag would re-measure the face on every frame of a drag.
-    val latestFit by rememberUpdatedState(digitFit)
-    val dragging by rememberUpdatedState(interacting)
+    // One coroutine owns the renderer, keyed on the settings that change the
+    // face itself. Moving or resizing the box is not one of them: the box is
+    // shader geometry, so a drag neither redraws nor re-uploads the digits.
     LaunchedEffect(style, showSeconds, animate, resolvedColor, hourFormat) {
         val measured = withContext(Dispatchers.Default) {
             faceRenderer.style = style
@@ -428,9 +389,6 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
         while (true) {
             val snapshot = withContext(Dispatchers.Default) {
                 runCatching {
-                    if (faceRenderer.digitFit != latestFit) {
-                        faceRenderer.digitFit = latestFit
-                    }
                     // Handed over as a copy: the renderer keeps reusing its
                     // own bitmap, and the preview must never read one that is
                     // being drawn into.
@@ -445,7 +403,7 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
                 faceRevision++
             }
             val animating = faceRenderer.isAnimating(SystemClock.uptimeMillis())
-            delay(if (dragging || showSeconds || animating) 90L else 1_000L)
+            delay(if (showSeconds || animating) 120L else 1_000L)
         }
     }
 
@@ -623,19 +581,6 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
                 canEyedrop = wallpaperBitmap != null,
                 onArmEyedropper = { eyedropperArmed = true },
                 maskFailure = maskFailure,
-                adaptiveNotice = when {
-                    !adaptiveEnabled ->
-                        "Adaptive size is off — turn it on in Advanced Settings " +
-                            "to have the digits fit around the subject."
-                    !subjectChecked -> "Looking for a subject in this photo…"
-                    subjectProfile == null ->
-                        "No clear subject in this photo, so the digits keep their " +
-                            "full height."
-                    digitFit == null ->
-                        "The subject is clear of the box, so the digits keep their " +
-                            "full height. Drag the box over it to see them fit."
-                    else -> "Digits are fitted above the subject."
-                },
                 segmentationDisabled = SegmentationCrashGuard.isDisabled(context),
                 onResetSegmentation = { SegmentationCrashGuard.reset(context) },
                 onResetPlacement = {
@@ -673,7 +618,6 @@ private fun ClockControls(
     canEyedrop: Boolean,
     onArmEyedropper: () -> Unit,
     maskFailure: String?,
-    adaptiveNotice: String?,
     segmentationDisabled: Boolean,
     onResetSegmentation: () -> Unit,
     onResetPlacement: () -> Unit
@@ -808,7 +752,6 @@ private fun ClockControls(
                     "system component, so nothing will occlude the clock until it " +
                     "is re-enabled."
             maskFailure != null -> "No depth effect yet: $maskFailure"
-            adaptiveNotice != null -> adaptiveNotice
             else -> null
         }
         if (notice != null) {

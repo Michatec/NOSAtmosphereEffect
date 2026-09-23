@@ -86,7 +86,6 @@ internal class VulkanAtmosphereHost(
         clockTexture.color = state.clockColor
         clockTexture.hourFormatOverride =
             AtmosphereClockPolicy.hourFormatOverride(state.clockHourFormat)
-        clockTexture.digitFit = state.clockDigitFit
     }
 
     fun updateState(state: AtmosphereRenderState) {

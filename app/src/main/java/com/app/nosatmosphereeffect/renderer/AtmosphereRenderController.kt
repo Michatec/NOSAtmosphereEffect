@@ -4,7 +4,6 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.util.Log
 import com.app.nosatmosphereeffect.helper.AtmosphereClockPolicy
-import com.app.nosatmosphereeffect.helper.ClockAdaptiveResolver
 import com.app.nosatmosphereeffect.helper.ClockFramePump
 import com.app.nosatmosphereeffect.helper.ClockOverlayState
 import com.app.nosatmosphereeffect.helper.ClockPalette
@@ -42,12 +41,6 @@ class AtmosphereRenderController(
     }
     @Volatile private var requestedClockColor: Int = AtmosphereClockPolicy.DEFAULT_COLOR
     @Volatile private var resolvedAutoClockColor: Int? = null
-    @Volatile private var lastClock: ClockOverlayState? = null
-
-    /** Adaptive clock sizing; see ClockAdaptiveResolver. */
-    private val clockAdaptive = ClockAdaptiveResolver(appContext, clockColorWorker) {
-        lastClock?.let(::applyAdaptiveScale)
-    }
 
     private var state = AtmosphereRenderState()
     private var engine: GLWallpaperService.GLEngine? = null
@@ -156,7 +149,6 @@ class AtmosphereRenderController(
      */
     fun configureClock(clock: ClockOverlayState) {
         val safe = clock.sanitized()
-        lastClock = safe
         requestedClockColor = safe.requestedColor
         val resolvedClock =
             AtmosphereClockPolicy.resolveEnabled(effectId, safe.enabled)
@@ -172,10 +164,6 @@ class AtmosphereRenderController(
             state = state.copy(
                 clockEnabled = resolvedClock,
                 clockDepthEnabled = safe.depthEnabled,
-                clockAdaptive = safe.adaptive,
-                clockDigitFit = clockAdaptive.fitFor(
-                    safe.copy(enabled = resolvedClock)
-                ),
                 clockStyleId = safe.styleId,
                 clockShowSeconds = safe.showSeconds,
                 clockAnimate = safe.animate,
@@ -248,19 +236,6 @@ class AtmosphereRenderController(
         }
     }
 
-    /** Folds a freshly known adaptive fit into the state. */
-    private fun applyAdaptiveScale(clock: ClockOverlayState) {
-        val enabled = AtmosphereClockPolicy.resolveEnabled(effectId, clock.enabled)
-        val fit = clockAdaptive.fitFor(clock.copy(enabled = enabled))
-        val snapshot = synchronized(lock) {
-            if (closed || state.clockDigitFit == fit) return
-            state = state.copy(clockDigitFit = fit).sanitized()
-            state
-        }
-        applyState(snapshot)
-        synchronized(lock) { engine }?.requestRender()
-    }
-
     private fun onClockTick() {
         val targets = synchronized(lock) {
             Triple(openGlAtmosphere, openGlReverse, vulkanHost)
@@ -309,9 +284,6 @@ class AtmosphereRenderController(
     fun reloadTexture() {
         // The image is changing, so any wallpaper-derived clock tint is stale.
         ClockPalette.invalidateAutoColor()
-        // A new photo has a new subject.
-        clockAdaptive.invalidate()
-        lastClock?.let(::applyAdaptiveScale)
         if (ClockPalette.isAuto(requestedClockColor)) refreshAutoClockColor()
         val targets = synchronized(lock) {
             Triple(openGlAtmosphere, openGlReverse, vulkanHost)
@@ -341,7 +313,6 @@ class AtmosphereRenderController(
     }
 
     fun release() {
-        clockAdaptive.close()
         clockPump.close()
         clockColorWorker.shutdownNow()
         val targets: RenderTargets
