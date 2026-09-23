@@ -783,6 +783,7 @@ class AtmosphereRenderer(
             pendingClockEntry = false
             clockTexture.beginEntry()
         }
+        clockTexture.digitFit = clockLayout.digitFit
         val ready = clockEnabled &&
             visibility > 0f &&
             clockOpacity > 0f &&

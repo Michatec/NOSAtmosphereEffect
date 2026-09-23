@@ -3,6 +3,7 @@ package com.app.nosatmosphereeffect.renderer
 import android.content.Context
 import android.util.Log
 import com.app.nosatmosphereeffect.helper.ClockAdaptiveResolver
+import com.app.nosatmosphereeffect.helper.ClockDigitFit
 import com.app.nosatmosphereeffect.helper.ClockFramePump
 import com.app.nosatmosphereeffect.helper.ClockOverlayState
 import com.app.nosatmosphereeffect.helper.ClockPalette
@@ -45,7 +46,7 @@ class ClockRuntime(
      * current wallpaper is known (or changes). Implementations fold the
      * factor into their clock state and ask for a frame.
      */
-    private val onLayoutResolved: (Float) -> Unit = {}
+    private val onLayoutResolved: (ClockDigitFit?) -> Unit = {}
 ) {
     private val appContext = context.applicationContext
     private val pump = ClockFramePump(appContext) { onTick() }
@@ -60,7 +61,7 @@ class ClockRuntime(
 
     private val adaptive = ClockAdaptiveResolver(appContext, colorWorker) {
         val state = lastState ?: return@ClockAdaptiveResolver
-        if (!closed) onLayoutResolved(adaptiveScaleFor(state))
+        if (!closed) onLayoutResolved(adaptiveFitFor(state))
     }
 
     /**
@@ -74,7 +75,7 @@ class ClockRuntime(
             color = ClockPalette.resolve(state.requestedColor, resolvedAutoColor)
         ).sanitized()
         lastState = colored
-        val resolved = colored.copy(adaptiveScale = adaptiveScaleFor(colored)).sanitized()
+        val resolved = colored.copy(digitFit = adaptiveFitFor(colored)).sanitized()
         pump.configure(resolved.enabled, resolved.showSeconds)
         if (resolved.enabled && ClockPalette.isAuto(requestedColor)) {
             refreshAutoColor()
@@ -86,12 +87,12 @@ class ClockRuntime(
     fun withResolvedColor(state: ClockOverlayState): ClockOverlayState {
         return state.copy(
             color = ClockPalette.resolve(state.requestedColor, resolvedAutoColor),
-            adaptiveScale = adaptiveScaleFor(state)
+            digitFit = adaptiveFitFor(state)
         ).sanitized()
     }
 
-    /** The adaptive size factor for [state] against the current wallpaper. */
-    fun adaptiveScaleFor(state: ClockOverlayState): Float = adaptive.scaleFor(state)
+    /** Where the digits may reach for [state] against the current wallpaper. */
+    fun adaptiveFitFor(state: ClockOverlayState): ClockDigitFit? = adaptive.fitFor(state)
 
     fun setEngineVisible(visible: Boolean) {
         pump.setVisible(visible)
@@ -107,8 +108,8 @@ class ClockRuntime(
         // A new photo has a new subject; re-derive (and cache) its profile.
         adaptive.invalidate()
         lastState?.let { state ->
-            val scale = adaptiveScaleFor(state)
-            if (!closed) onLayoutResolved(scale)
+            val fit = adaptiveFitFor(state)
+            if (!closed) onLayoutResolved(fit)
         }
     }
 

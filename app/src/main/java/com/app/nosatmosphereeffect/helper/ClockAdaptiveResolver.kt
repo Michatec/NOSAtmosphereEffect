@@ -28,22 +28,23 @@ class ClockAdaptiveResolver(
     private val faceBoxes = HashMap<String, ClockFaceBox>()
     @Volatile private var closed = false
 
-    fun scaleFor(state: ClockOverlayState): Float {
-        if (!state.enabled || !state.adaptive) return 1f
+    fun fitFor(state: ClockOverlayState): ClockDigitFit? {
+        if (!state.enabled || !state.adaptive) return null
         val profile = ClockSubjectLayout.cached(appContext)
         if (profile == null) {
             requestProfile()
-            return 1f
+            return null
         }
-        val face = faceBox(state) ?: return 1f
-        return ClockAdaptiveLayout.scale(
+        val face = faceBox(state) ?: return null
+        val screenAspect = ClockSubjectLayout.screenAspect(appContext)
+        val boxHeight = state.renderHeight
+        val boxWidth = boxHeight * state.renderTextureAspect(face.aspect) / screenAspect
+        return ClockAdaptiveLayout.digitFit(
             profile = profile,
             centerX = state.centerX,
             boxTop = state.renderTop,
-            boxHeight = state.stretchedHeight,
-            face = face,
-            faceAspect = state.renderTextureAspect(face.aspect),
-            screenAspect = ClockSubjectLayout.screenAspect(appContext)
+            boxHeight = boxHeight,
+            boxWidth = boxWidth
         )
     }
 

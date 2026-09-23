@@ -21,6 +21,7 @@ import com.app.nosatmosphereeffect.helper.ClockPalette
 import com.app.nosatmosphereeffect.helper.ClockOverlayState
 import com.app.nosatmosphereeffect.helper.ClockPreferences
 import com.app.nosatmosphereeffect.helper.PlaylistModeManager
+import com.app.nosatmosphereeffect.helper.ClockScreen
 import com.app.nosatmosphereeffect.helper.ClockStyle
 import com.app.nosatmosphereeffect.helper.EffectStatePolicy
 import com.app.nosatmosphereeffect.helper.GlassEffectPreferences
@@ -59,7 +60,13 @@ class EffectPreviewService(
     private val settingsMode: EffectPreviewSettingsMode =
         EffectPreviewSettingsMode.SAVED_ACTIVE,
     private val atmosphereGlassEnabledOverride: Boolean? = null,
-    private val forceOpenGlEs: Boolean = false
+    private val forceOpenGlEs: Boolean = false,
+    /**
+     * Shows the clock whatever the lock/home setting says. The calibration
+     * screen exists to position the clock, so it must never be invisible
+     * there because the effect happens to be showing its other side.
+     */
+    private val clockAlwaysVisible: Boolean = false
 ) {
     private val appContext = context.applicationContext
 
@@ -93,7 +100,7 @@ class EffectPreviewService(
             val clock = EffectPreviewStatePolicy.clockOf(initial)
             EffectPreviewStatePolicy.withClock(
                 initial,
-                clock.copy(adaptiveScale = clockAdaptive.scaleFor(clock))
+                clock.copy(digitFit = clockAdaptive.fitFor(clock))
             )
         }
     )
@@ -236,9 +243,10 @@ class EffectPreviewService(
         if (released.get()) return
         val snapshot = renderState.updateAndGet { state ->
             val next = transform(EffectPreviewStatePolicy.clockOf(state))
+                .forcedVisibleIfNeeded()
             EffectPreviewStatePolicy.withClock(
                 state,
-                next.copy(adaptiveScale = clockAdaptive.scaleFor(next))
+                next.copy(digitFit = clockAdaptive.fitFor(next))
             )
         }
         when (activeBackend) {
@@ -377,8 +385,13 @@ class EffectPreviewService(
                 clock.requestedColor,
                 ClockPalette.autoColorFor(appContext)
             ),
-            adaptiveScale = clockAdaptive.scaleFor(clock)
-        ).sanitized()
+            digitFit = clockAdaptive.fitFor(clock)
+        ).forcedVisibleIfNeeded().sanitized()
+    }
+
+    private fun ClockOverlayState.forcedVisibleIfNeeded(): ClockOverlayState {
+        if (!clockAlwaysVisible) return this
+        return copy(enabled = true, screenId = ClockScreen.BOTH.id)
     }
 
     private fun createInitialState(): EffectPreviewRenderState {

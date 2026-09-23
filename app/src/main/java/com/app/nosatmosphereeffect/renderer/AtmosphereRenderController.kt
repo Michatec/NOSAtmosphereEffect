@@ -173,7 +173,7 @@ class AtmosphereRenderController(
                 clockEnabled = resolvedClock,
                 clockDepthEnabled = safe.depthEnabled,
                 clockAdaptive = safe.adaptive,
-                clockAdaptiveScale = clockAdaptive.scaleFor(
+                clockDigitFit = clockAdaptive.fitFor(
                     safe.copy(enabled = resolvedClock)
                 ),
                 clockStyleId = safe.styleId,
@@ -248,13 +248,13 @@ class AtmosphereRenderController(
         }
     }
 
-    /** Folds a freshly known adaptive size into the state. */
+    /** Folds a freshly known adaptive fit into the state. */
     private fun applyAdaptiveScale(clock: ClockOverlayState) {
         val enabled = AtmosphereClockPolicy.resolveEnabled(effectId, clock.enabled)
-        val scale = clockAdaptive.scaleFor(clock.copy(enabled = enabled))
+        val fit = clockAdaptive.fitFor(clock.copy(enabled = enabled))
         val snapshot = synchronized(lock) {
-            if (closed || state.clockAdaptiveScale == scale) return
-            state = state.copy(clockAdaptiveScale = scale).sanitized()
+            if (closed || state.clockDigitFit == fit) return
+            state = state.copy(clockDigitFit = fit).sanitized()
             state
         }
         applyState(snapshot)

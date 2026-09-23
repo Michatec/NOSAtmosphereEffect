@@ -70,11 +70,17 @@ If Canvas Sketch cannot find a confident foreground subject, it falls back to sk
 
 #### Wallpaper Clock
 
-Every effect can draw a clock into the wallpaper itself (Advanced Settings → Clock; single-image mode only). **Choose style, position & size** opens a live preview where you drag and resize it and pick a face, colour (including one taken from the wallpaper) and 12/24-hour format.
+Every effect can draw a clock into the wallpaper itself (Advanced Settings → Clock; single-image mode only). **Choose style, position & size** opens a live preview where you drag and resize it and pick a face, colour (including one taken from the wallpaper) and 12/24-hour format. The clock is always shown while you are setting it up and in the wallpaper picker's preview, whichever screen it is set to appear on.
+
+Two faces, both made of glass: the wallpaper shows through the digits, bent at their rounded edges, softly frosted inside and lit along the top.
+
+* **Liquid Glass:** hours and minutes side by side.
+* **Liquid Glass Stacked:** hours above minutes, which goes much larger on a phone.
+
+Two switches control how the clock reacts to the photo:
 
 * **Depth effect:** Draws the photo's subject back over the clock, so the clock sits behind them.
-* **Adaptive size:** Like the One UI lock-screen clock, the clock shrinks (keeping its top edge) until the digits no longer touch the subject. If even its smallest size would still overlap, it keeps its full size and the depth effect puts it behind the subject instead. The subject is analysed once per wallpaper, on the device, and the result is cached.
-* **Liquid Glass face:** Huge stacked digits made of glass. The wallpaper shows through them, bent at the rounded edges, softly frosted inside and lit along the top.
+* **Adaptive size:** Like the One UI lock-screen clock, the clock keeps the position and size you chose and each digit sizes itself: a digit over empty sky stays full height, while one whose column runs into the subject is shortened just enough to clear it. On the stacked face a column's bottom digit gives up most of the height and the digit above it only eases off a little. Digits never shrink past a readable floor — if the subject reaches that far the depth effect puts the clock behind it instead. The subject is analysed once per wallpaper, on the device, and the result is cached.
 
 Depth and adaptive size use the same on-device subject model as subject isolation (see above).
 

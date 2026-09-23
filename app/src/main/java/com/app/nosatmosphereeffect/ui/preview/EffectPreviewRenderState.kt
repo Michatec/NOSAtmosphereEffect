@@ -82,7 +82,7 @@ internal object EffectPreviewStatePolicy {
                         clockEnabled = safe.enabled,
                         clockDepthEnabled = safe.depthEnabled,
                         clockAdaptive = safe.adaptive,
-                        clockAdaptiveScale = safe.adaptiveScale,
+                        clockDigitFit = safe.digitFit,
                         clockStyleId = safe.styleId,
                         clockShowSeconds = safe.showSeconds,
                         clockAnimate = safe.animate,

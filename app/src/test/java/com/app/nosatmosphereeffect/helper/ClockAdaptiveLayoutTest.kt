@@ -1,72 +1,114 @@
 package com.app.nosatmosphereeffect.helper
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ClockAdaptiveLayoutTest {
-    /** Glyphs fill the whole face box, to keep the arithmetic readable. */
-    private val fullFace = ClockFaceBox(aspect = 1f, left = 0f, top = 0f, right = 1f, bottom = 1f)
 
     private fun profile(vararg tops: Float) = SubjectProfile(tops)
 
-    private fun scale(
+    private fun fit(
         profile: SubjectProfile,
         boxTop: Float = 0.10f,
         boxHeight: Float = 0.30f,
+        boxWidth: Float = 0.60f,
         centerX: Float = 0.5f
-    ) = ClockAdaptiveLayout.scale(
+    ) = ClockAdaptiveLayout.digitFit(
         profile = profile,
         centerX = centerX,
         boxTop = boxTop,
         boxHeight = boxHeight,
-        face = fullFace,
-        faceAspect = 1f,
-        screenAspect = 0.5f
+        boxWidth = boxWidth
     )
 
     @Test
-    fun `no subject keeps the full size`() {
-        assertEquals(1f, scale(profile(1f, 1f, 1f, 1f)), 0f)
+    fun `nothing in the clock's way produces no fit at all`() {
+        assertNull(fit(profile(1f, 1f, 1f, 1f)))
+        // Subject starts below the box: 0.10 + 0.30 = 0.40.
+        assertNull(fit(profile(0.55f, 0.55f, 0.55f, 0.55f)))
     }
 
     @Test
-    fun `a subject below the clock keeps the full size`() {
-        assertEquals(1f, scale(profile(1f, 0.8f, 0.8f, 1f)), 0f)
+    fun `a subject inside the box limits the columns it covers`() {
+        // Subject on the right half only, starting at 0.25 of the screen.
+        val tops = FloatArray(20) { column -> if (column >= 10) 0.25f else 1f }
+        val result = fit(SubjectProfile(tops))
+        assertNotNull(result)
+        checkNotNull(result)
+
+        // Left of the box is clear, right is cut to (0.25 - clearance - 0.10) / 0.30.
+        assertEquals(1f, result.limitFor(0f, 0.2f), 1e-4f)
+        val expected = (0.25f - ClockAdaptiveLayout.CLEARANCE - 0.10f) / 0.30f
+        assertEquals(expected, result.limitFor(0.8f, 1f), 0.01f)
     }
 
     @Test
-    fun `the clock shrinks until its bottom clears the subject`() {
-        // Subject starts at 0.30; clock top is 0.10, so the digits may be at
-        // most 0.30 - 0.10 - clearance tall.
-        val result = scale(profile(0.30f, 0.30f, 0.30f, 0.30f))
-        val expected = (0.30f - 0.10f - ClockAdaptiveLayout.CLEARANCE) / 0.30f
-        assertEquals(expected, result, 0.002f)
-        assertTrue(0.10f + 0.30f * result + ClockAdaptiveLayout.CLEARANCE <= 0.30f + 1e-4f)
+    fun `a digit over empty sky keeps its full height`() {
+        val tops = FloatArray(20) { column -> if (column >= 10) 0.25f else 1f }
+        val result = fit(SubjectProfile(tops))!!
+        assertEquals(1f, ClockAdaptiveLayout.digitScale(result.limitFor(0f, 0.2f) * 100f, 100f), 0f)
     }
 
     @Test
-    fun `a narrower clock can clear a shoulder the full-size one touched`() {
-        // Shoulders high at the edges, head low in the middle strip only. At
-        // full size (width 0.6 of the screen) the clock spans the shoulders;
-        // shrunk, it only spans the middle, where the subject starts lower.
-        val shoulders = FloatArray(20) { column -> if (column in 7..12) 0.9f else 0.32f }
-        val result = scale(SubjectProfile(shoulders))
-        assertTrue("expected a real shrink, got $result", result < 1f)
-        assertTrue("expected more than the floor, got $result", result > 0.42f)
+    fun `a subject above the clock cannot shrink the digits past the floor`() {
+        val result = fit(profile(0.02f, 0.02f, 0.02f))!!
+        val scale = ClockAdaptiveLayout.digitScale(result.limitFor(0f, 1f) * 100f, 100f)
+        assertEquals(AtmosphereClockPolicy.MIN_ADAPTIVE_SCALE, scale, 1e-4f)
     }
 
     @Test
-    fun `when even the smallest size overlaps, the clock keeps its size`() {
-        // Subject reaches above the clock's own top edge: shrinking cannot help.
-        assertEquals(1f, scale(profile(0.05f, 0.05f, 0.05f)), 0f)
+    fun `digitScale never grows a digit beyond its natural height`() {
+        assertEquals(1f, ClockAdaptiveLayout.digitScale(available = 500f, natural = 100f), 0f)
     }
 
     @Test
-    fun `the result never drops below the floor`() {
-        val result = scale(profile(0.24f, 0.24f, 0.24f))
-        assertTrue(result >= AtmosphereClockPolicy.MIN_ADAPTIVE_SCALE)
+    fun `a stacked column with room keeps both rows full height`() {
+        val scales = ClockAdaptiveLayout.stackedDigitScales(
+            rowCount = 2,
+            rowHeight = 100f,
+            rowSpacing = 10f,
+            available = 210f
+        )
+        assertEquals(listOf(1f, 1f), scales.toList())
+    }
+
+    @Test
+    fun `a stacked column gives up most of the height from its bottom row`() {
+        // Base 210, available 160 -> 50 to give up: 10 from the top, 40 below.
+        val scales = ClockAdaptiveLayout.stackedDigitScales(
+            rowCount = 2,
+            rowHeight = 100f,
+            rowSpacing = 10f,
+            available = 160f
+        )
+        assertEquals(0.90f, scales[0], 1e-4f)
+        assertEquals(0.60f, scales[1], 1e-4f)
+        assertTrue("the bottom row must shorten more", scales[1] < scales[0])
+    }
+
+    @Test
+    fun `stacked rows stay above the floor`() {
+        val scales = ClockAdaptiveLayout.stackedDigitScales(
+            rowCount = 2,
+            rowHeight = 100f,
+            rowSpacing = 10f,
+            available = 0f
+        )
+        scales.forEach { assertTrue(it >= AtmosphereClockPolicy.MIN_ADAPTIVE_SCALE) }
+    }
+
+    @Test
+    fun `an unconstrained fit is recognised as such`() {
+        assertTrue(ClockDigitFit(floatArrayOf(1f, 1f)).unconstrained)
+        assertTrue(!ClockDigitFit(floatArrayOf(1f, 0.5f)).unconstrained)
+    }
+
+    @Test
+    fun `fits compare by their contents so states can be deduplicated`() {
+        assertEquals(ClockDigitFit(floatArrayOf(1f, 0.5f)), ClockDigitFit(floatArrayOf(1f, 0.5f)))
     }
 
     @Test

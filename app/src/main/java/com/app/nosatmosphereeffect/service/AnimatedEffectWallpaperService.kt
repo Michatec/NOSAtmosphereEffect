@@ -12,6 +12,9 @@ import android.os.PowerManager
 import android.util.Log
 import android.view.SurfaceHolder
 import android.view.animation.LinearInterpolator
+import com.app.nosatmosphereeffect.helper.ClockOverlayState
+import com.app.nosatmosphereeffect.helper.ClockPreferences
+import com.app.nosatmosphereeffect.helper.ClockScreen
 import com.app.nosatmosphereeffect.helper.GLWallpaperService
 import com.app.nosatmosphereeffect.helper.EffectStatePolicy
 import com.app.nosatmosphereeffect.helper.PlaylistModeManager
@@ -65,6 +68,40 @@ abstract class AnimatedEffectWallpaperService<R : Any> : GLWallpaperService() {
     protected open fun onEngineVisibilityChanged(renderer: R?, visible: Boolean) = Unit
 
     protected open fun releaseRenderer(renderer: R) = Unit
+
+    /**
+     * True while [configureRenderer] runs for a preview engine.
+     *
+     * A service hosts several engines — the wallpaper picker's preview and the
+     * live wallpaper can exist at once — so this cannot be a lasting flag. It
+     * is set immediately around the call and read only from [readClockState],
+     * both on the engine's main thread, so the two engines cannot interleave
+     * inside it.
+     */
+    @Volatile
+    private var configuringPreviewEngine = false
+
+    /**
+     * The clock settings for this effect, with the one preview-only
+     * difference: in a preview the keyguard is not locked, so a lock-screen
+     * clock would fade to nothing and the wallpaper picker would show no clock
+     * at all while the user is setting it up. Previews therefore show it on
+     * both sides.
+     */
+    protected fun readClockState(preferences: SharedPreferences): ClockOverlayState {
+        val clock = ClockPreferences.read(
+            preferences = preferences,
+            effectId = effectId,
+            singleImageMode = isClockSingleImageMode(),
+            lockedProgress = lockedProgress,
+            unlockedProgress = unlockedProgress
+        )
+        return if (configuringPreviewEngine) {
+            clock.copy(screenId = ClockScreen.BOTH.id)
+        } else {
+            clock
+        }
+    }
 
     /**
      * Whether the clock may show: it is single-image only (a position
@@ -307,7 +344,13 @@ abstract class AnimatedEffectWallpaperService<R : Any> : GLWallpaperService() {
                 this@AnimatedEffectWallpaperService
             )
             val preferences = getSharedPreferences(PREFERENCES_NAME, MODE_PRIVATE)
-            configureRenderer(currentRenderer, preferences)
+            // Read back by readClockState() during this call — see the field.
+            configuringPreviewEngine = isPreview
+            try {
+                configureRenderer(currentRenderer, preferences)
+            } finally {
+                configuringPreviewEngine = false
+            }
         }
 
         private fun reconcileBehavior(
