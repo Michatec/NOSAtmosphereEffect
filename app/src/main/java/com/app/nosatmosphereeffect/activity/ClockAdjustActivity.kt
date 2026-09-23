@@ -83,13 +83,16 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.app.nosatmosphereeffect.helper.AtmosphereClockPolicy
+import com.app.nosatmosphereeffect.helper.ClockBoxHandle
+import com.app.nosatmosphereeffect.helper.ClockBoxPlacement
+import com.app.nosatmosphereeffect.helper.ClockBoxRect
 import com.app.nosatmosphereeffect.helper.ClockFaceBox
+import com.app.nosatmosphereeffect.helper.ClockPlacement
 import com.app.nosatmosphereeffect.helper.ClockFaceRenderer
 import android.os.SystemClock
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.ui.geometry.Rect
-import com.app.nosatmosphereeffect.ui.components.ClockBoxHandle
 import com.app.nosatmosphereeffect.ui.components.ClockBoxOverlay
 import com.app.nosatmosphereeffect.ui.components.ClockGlassPreview
 import com.app.nosatmosphereeffect.helper.ClockPalette
@@ -342,31 +345,17 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
 
     val resolvedColor = ClockPalette.resolve(colorPref, autoColor)
     val screenAspect = if (containerHeightPx > 0f) containerWidthPx / containerHeightPx else 0.5f
-    // The box: height is the stored fraction, width follows from the face's
-    // own proportions and the user's width stretch — the same arithmetic the
-    // shaders do, so what is dragged here is what the wallpaper draws.
-    val boxHeight = heightFraction.coerceIn(
-        AtmosphereClockPolicy.MIN_HEIGHT,
-        AtmosphereClockPolicy.MAX_HEIGHT
-    )
-    val boxWidth = if (screenAspect > 0f) {
-        boxHeight * faceAspect * widthScale / screenAspect
-    } else {
-        boxHeight
-    }
-    val box = Rect(
-        left = centerX - boxWidth / 2f,
+    val placement = ClockPlacement(
+        centerX = centerX,
         top = top,
-        right = centerX + boxWidth / 2f,
-        bottom = top + boxHeight
+        height = heightFraction,
+        widthScale = widthScale
     )
-    // What the user sees and drags: the digits' own frame.
-    val contentBox = Rect(
-        left = box.left + faceContent.left * box.width,
-        top = box.top + faceContent.top * box.height,
-        right = box.left + faceContent.right * box.width,
-        bottom = box.top + faceContent.bottom * box.height
-    )
+    // Two rectangles: the face texture, which is what the shaders place, and
+    // the digits inside it, which is what the user sees and drags.
+    val textureBox = ClockBoxPlacement.textureBox(placement, faceAspect, screenAspect)
+    val contentBox =
+        ClockBoxPlacement.contentBox(placement, faceAspect, faceContent, screenAspect)
 
     // One coroutine owns the renderer, keyed on the settings that change the
     // face itself. Moving or resizing the box is not one of them: the box is
@@ -407,60 +396,33 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
         }
     }
 
-    fun applyBox(proposed: Rect, handle: ClockBoxHandle) {
+    // The placement as it was when the finger went down. Every frame of a
+    // gesture is resolved against it, so a drag cannot drift, and clamping at
+    // a limit cannot feed back into the next frame.
+    var dragStart by remember { mutableStateOf<ClockPlacement?>(null) }
+
+    fun applyBox(proposed: ClockBoxRect, handle: ClockBoxHandle) {
         interacting = true
         lastInteractionMs = System.currentTimeMillis()
-        if (screenAspect <= 0f || faceAspect <= 0f) return
-        // [proposed] is the digits' frame. Everything is worked out there, so
-        // the edge under the finger is the edge that moves, and only the last
-        // step converts back to the texture rectangle that gets stored.
-        val contentWidthFraction = (faceContent.right - faceContent.left).coerceAtLeast(0.05f)
-        val contentHeightFraction = (faceContent.bottom - faceContent.top).coerceAtLeast(0.05f)
-        val wantedContentHeight =
-            if (handle.resizesHeight) proposed.height else contentBox.height
-        val wantedContentWidth =
-            if (handle.resizesWidth) proposed.width else contentBox.width
-
-        val textureHeight = AtmosphereClockPolicy.sanitizeHeight(
-            wantedContentHeight / contentHeightFraction
+        val origin = dragStart ?: placement
+        val settled = ClockBoxPlacement.apply(
+            start = origin,
+            proposed = proposed,
+            handle = handle,
+            faceAspect = faceAspect,
+            content = faceContent,
+            screenAspect = screenAspect
         )
-        val wantedTextureWidth = wantedContentWidth / contentWidthFraction
-        val newWidthScale = AtmosphereClockPolicy.sanitizeAxisScale(
-            wantedTextureWidth * screenAspect / (textureHeight * faceAspect)
-        )
-        val textureWidth = textureHeight * faceAspect * newWidthScale / screenAspect
-        val settledContentWidth = textureWidth * contentWidthFraction
-        val settledContentHeight = textureHeight * contentHeightFraction
-
-        val contentLeft = when (handle) {
-            ClockBoxHandle.MOVE -> proposed.left
-            ClockBoxHandle.TOP_LEFT, ClockBoxHandle.BOTTOM_LEFT, ClockBoxHandle.LEFT ->
-                contentBox.right - settledContentWidth
-            ClockBoxHandle.TOP_RIGHT, ClockBoxHandle.BOTTOM_RIGHT, ClockBoxHandle.RIGHT ->
-                contentBox.left
-            else -> contentBox.left + (contentBox.width - settledContentWidth) / 2f
+        if (handle == ClockBoxHandle.MOVE &&
+            ClockBoxPlacement.isCentred(settled) &&
+            !ClockBoxPlacement.isCentred(placement)
+        ) {
+            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
         }
-        val contentTop = when (handle) {
-            ClockBoxHandle.MOVE -> proposed.top
-            ClockBoxHandle.TOP_LEFT, ClockBoxHandle.TOP_RIGHT, ClockBoxHandle.TOP ->
-                contentBox.bottom - settledContentHeight
-            else -> contentBox.top
-        }
-
-        val textureLeft = contentLeft - faceContent.left * textureWidth
-        val textureTop = contentTop - faceContent.top * textureHeight
-        val newCenterX = textureLeft + textureWidth / 2f
-        centerX = if (abs(newCenterX - 0.5f) < CENTER_SNAP) {
-            if (abs(centerX - 0.5f) >= CENTER_SNAP) {
-                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-            }
-            0.5f
-        } else {
-            AtmosphereClockPolicy.sanitizeCenterX(newCenterX)
-        }
-        top = AtmosphereClockPolicy.sanitizeTop(textureTop)
-        heightFraction = textureHeight
-        widthScale = newWidthScale
+        centerX = settled.centerX
+        top = settled.top
+        heightFraction = settled.height
+        widthScale = settled.widthScale
         heightScale = 1f
     }
 
@@ -474,7 +436,7 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
             ClockGlassPreview(
                 wallpaper = wallpaperBitmap,
                 face = faceBitmap,
-                box = box,
+                box = textureBox,
                 opacity = opacity,
                 faceRevision = faceRevision,
                 modifier = Modifier.fillMaxSize()
@@ -488,14 +450,18 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
         if (containerWidthPx > 0f && containerHeightPx > 0f) {
             ClockBoxOverlay(
                 box = contentBox,
-                centered = abs(centerX - 0.5f) < 0.001f,
+                centered = ClockBoxPlacement.isCentred(placement),
                 showHandles = !eyedropperArmed,
                 onBoxChange = ::applyBox,
                 onDragStarted = {
+                    dragStart = placement
                     interacting = true
                     lastInteractionMs = System.currentTimeMillis()
                 },
-                onDragFinished = { lastInteractionMs = System.currentTimeMillis() },
+                onDragFinished = {
+                    dragStart = null
+                    lastInteractionMs = System.currentTimeMillis()
+                },
                 onTap = { position ->
                     val source = wallpaperBitmap
                     if (eyedropperArmed && source != null) {
@@ -650,7 +616,10 @@ private fun ClockControls(
 
         Spacer(Modifier.height(12.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            SectionLabel("Colour")
+            // "Tint", not "Colour": glass takes its brightness from the
+            // wallpaper showing through it, and the chosen colour tints that
+            // rather than filling the digits with a flat colour.
+            SectionLabel("Glass tint")
             Spacer(Modifier.width(8.dp))
             AtmoTextButton(
                 text = if (pickerOpen) "Close wheel" else "Colour wheel",
