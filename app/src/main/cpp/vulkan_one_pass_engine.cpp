@@ -12,6 +12,8 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <deque>
+#include <mutex>
 #include <limits>
 #include <optional>
 #include <string>
@@ -32,8 +34,30 @@ constexpr std::array<uint32_t, 4> kSupportedCoreApiVersions{
     VK_API_VERSION_1_1
 };
 
+// Every native failure funnels through logError, so it is also the one place
+// worth capturing from. logcat is fine for development, but the whole point of
+// the in-app diagnostics screen is that a user hitting a Vulkan fallback on a
+// device we do not have can read the actual reason without adb.
+std::mutex& diagnosticsMutex() {
+    static std::mutex mutex;
+    return mutex;
+}
+
+std::deque<std::string>& diagnosticsBuffer() {
+    static std::deque<std::string> buffer;
+    return buffer;
+}
+
+constexpr size_t kMaximumDiagnosticEntries = 64;
+
 void logError(const std::string& message) {
     __android_log_print(ANDROID_LOG_ERROR, kLogTag, "%s", message.c_str());
+    std::lock_guard<std::mutex> guard(diagnosticsMutex());
+    std::deque<std::string>& buffer = diagnosticsBuffer();
+    buffer.push_back(message);
+    while (buffer.size() > kMaximumDiagnosticEntries) {
+        buffer.pop_front();
+    }
 }
 
 bool hasExtension(
@@ -285,10 +309,29 @@ public:
         uint32_t requestedWidth,
         uint32_t requestedHeight
     ) {
+        // A resize — which on a foldable means every fold — does not need a
+        // new instance, device, pipeline or wallpaper texture. Rebuilding all
+        // of that took long enough that the compositor kept stretching the
+        // last frame across the whole fold animation, which is exactly the
+        // squeeze users see. Try to swap only the swapchain first.
+        if (resizeSurfaceInPlace(env, javaSurface, requestedWidth, requestedHeight)) {
+            return true;
+        }
+
         destroySurface();
         window_ = ANativeWindow_fromSurface(env, javaSurface);
         if (window_ == nullptr) {
             logError("ANativeWindow_fromSurface returned null");
+            return false;
+        }
+        // An abandoned window (its BufferQueue already torn down by the
+        // framework) reports a negative status here. Handing such a window
+        // to vkCreateAndroidSurfaceKHR/vkCreateSwapchainKHR crashes some
+        // drivers instead of returning VK_ERROR_SURFACE_LOST_KHR.
+        if (ANativeWindow_getWidth(window_) <= 0 ||
+            ANativeWindow_getHeight(window_) <= 0) {
+            logError("The wallpaper window was abandoned before Vulkan setup");
+            destroySurface();
             return false;
         }
         requestedWidth_ = requestedWidth;
@@ -312,6 +355,10 @@ public:
             const uint32_t bindingBit = 1U << binding;
             if ((optionalTextureMask_ & bindingBit) != 0 &&
                 !clearTexture(binding)) {
+                logError(
+                    label_ + " surface setup failed: clearing optional texture binding " +
+                    std::to_string(binding)
+                );
                 destroySurface();
                 return false;
             }
@@ -584,6 +631,7 @@ public:
                 VK_TRUE,
                 std::numeric_limits<uint64_t>::max()
             ) != VK_SUCCESS) {
+            logError(label_ + " surface setup failed: vkWaitForFences");
             return false;
         }
         void* mapped = nullptr;
@@ -595,6 +643,7 @@ public:
                 0,
                 &mapped
             ) != VK_SUCCESS) {
+            logError(label_ + " surface setup failed: vkMapMemory");
             return false;
         }
         std::memcpy(mapped, data, size);
@@ -688,6 +737,127 @@ public:
     }
 
 private:
+    /**
+     * Tears down only what is tied to the current swapchain: the sync objects
+     * sized to the swapchain image count, the framebuffers, the image views,
+     * the swapchain, the VkSurfaceKHR and the ANativeWindow.
+     *
+     * Everything above that — instance, physical device, logical device,
+     * descriptor set, render pass, pipeline, command pool, uniform buffer and
+     * the wallpaper textures — is independent of the surface size and stays
+     * alive across a resize.
+     */
+    void destroySwapchainDependents() {
+        if (device_ != VK_NULL_HANDLE) {
+            vkDeviceWaitIdle(device_);
+            if (imageAvailable_ != VK_NULL_HANDLE) {
+                vkDestroySemaphore(device_, imageAvailable_, nullptr);
+                imageAvailable_ = VK_NULL_HANDLE;
+            }
+            for (VkSemaphore semaphore : renderFinishedSemaphores_) {
+                if (semaphore != VK_NULL_HANDLE) {
+                    vkDestroySemaphore(device_, semaphore, nullptr);
+                }
+            }
+            renderFinishedSemaphores_.clear();
+            if (renderFence_ != VK_NULL_HANDLE) {
+                vkDestroyFence(device_, renderFence_, nullptr);
+                renderFence_ = VK_NULL_HANDLE;
+            }
+            for (VkFramebuffer framebuffer : framebuffers_) {
+                if (framebuffer != VK_NULL_HANDLE) {
+                    vkDestroyFramebuffer(device_, framebuffer, nullptr);
+                }
+            }
+            framebuffers_.clear();
+            for (VkImageView imageView : swapchainImageViews_) {
+                if (imageView != VK_NULL_HANDLE) {
+                    vkDestroyImageView(device_, imageView, nullptr);
+                }
+            }
+            swapchainImageViews_.clear();
+            swapchainImages_.clear();
+            if (swapchain_ != VK_NULL_HANDLE) {
+                vkDestroySwapchainKHR(device_, swapchain_, nullptr);
+                swapchain_ = VK_NULL_HANDLE;
+            }
+        }
+        if (surface_ != VK_NULL_HANDLE && instance_ != VK_NULL_HANDLE) {
+            vkDestroySurfaceKHR(instance_, surface_, nullptr);
+        }
+        surface_ = VK_NULL_HANDLE;
+        if (window_ != nullptr) {
+            ANativeWindow_release(window_);
+            window_ = nullptr;
+        }
+        extent_ = {};
+    }
+
+    /**
+     * Rebuilds the swapchain for a new surface size while keeping the rest of
+     * the engine intact. Returns false — having left nothing half-built that
+     * [destroySurface] cannot clean up — whenever the cheap path does not
+     * apply, so the caller can fall back to a full rebuild.
+     *
+     * The wallpaper texture deliberately survives, which is what lets the
+     * first frame after a fold be a texture upload rather than a from-scratch
+     * Vulkan bring-up.
+     */
+    bool resizeSurfaceInPlace(
+        JNIEnv* env,
+        jobject javaSurface,
+        uint32_t requestedWidth,
+        uint32_t requestedHeight
+    ) {
+        // Nothing to reuse before the first successful bring-up, or after a
+        // real surface destruction.
+        if (instance_ == VK_NULL_HANDLE ||
+            physicalDevice_ == VK_NULL_HANDLE ||
+            device_ == VK_NULL_HANDLE ||
+            renderPass_ == VK_NULL_HANDLE ||
+            pipeline_ == VK_NULL_HANDLE ||
+            pipelineLayout_ == VK_NULL_HANDLE ||
+            descriptorSet_ == VK_NULL_HANDLE ||
+            commandBuffer_ == VK_NULL_HANDLE) {
+            return false;
+        }
+
+        const VkFormat previousFormat = swapchainFormat_;
+        destroySwapchainDependents();
+
+        window_ = ANativeWindow_fromSurface(env, javaSurface);
+        if (window_ == nullptr) {
+            logError("ANativeWindow_fromSurface returned null during resize");
+            return false;
+        }
+        requestedWidth_ = requestedWidth;
+        requestedHeight_ = requestedHeight;
+
+        if (!createAndroidSurface()) return false;
+
+        // The device was chosen for the previous surface. It is the same
+        // physical display in practice, but presentation support is cheap to
+        // confirm and a wrong answer here would be a validation error.
+        VkBool32 presentSupported = VK_FALSE;
+        if (vkGetPhysicalDeviceSurfaceSupportKHR(
+                physicalDevice_,
+                queueFamily_,
+                surface_,
+                &presentSupported
+            ) != VK_SUCCESS ||
+            presentSupported != VK_TRUE) {
+            return false;
+        }
+
+        if (!createSwapchain()) return false;
+        // The render pass and the pipeline are built against the swapchain
+        // format. It does not change across a fold, but if it ever does the
+        // full rebuild is the correct answer.
+        if (swapchainFormat_ != previousFormat) return false;
+        if (!createFramebuffers()) return false;
+        return createSyncResources();
+    }
+
     bool createNegotiatedInstanceAndSelectDevice() {
         const uint32_t loaderVersion = loaderCoreApiVersion();
         if (loaderVersion < VK_API_VERSION_1_1) {
@@ -699,6 +869,7 @@ private:
             !createAndroidSurface() ||
             !selectPhysicalDevice(loaderVersion)) {
             destroyNegotiationInstance();
+            logError(label_ + " surface setup failed: instance/surface/device selection");
             return false;
         }
 
@@ -769,10 +940,13 @@ private:
         createInfo.enabledExtensionCount =
             static_cast<uint32_t>(requiredExtensions.size());
         createInfo.ppEnabledExtensionNames = requiredExtensions.data();
-        if (vkCreateInstance(&createInfo, nullptr, &instance_) != VK_SUCCESS) {
+        VkInstance instance = VK_NULL_HANDLE;
+        if (vkCreateInstance(&createInfo, nullptr, &instance) != VK_SUCCESS ||
+            instance == VK_NULL_HANDLE) {
             logError("vkCreateInstance failed");
             return false;
         }
+        instance_ = instance;
         instanceApiVersion_ = requestedApiVersion;
         return true;
     }
@@ -782,15 +956,19 @@ private:
             VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR
         };
         surfaceInfo.window = window_;
-        if (vkCreateAndroidSurfaceKHR(
+        VkSurfaceKHR surface = VK_NULL_HANDLE;
+        if (window_ == nullptr ||
+            vkCreateAndroidSurfaceKHR(
                 instance_,
                 &surfaceInfo,
                 nullptr,
-                &surface_
-            ) != VK_SUCCESS) {
+                &surface
+            ) != VK_SUCCESS ||
+            surface == VK_NULL_HANDLE) {
             logError("vkCreateAndroidSurfaceKHR failed");
             return false;
         }
+        surface_ = surface;
         return true;
     }
 
@@ -811,6 +989,7 @@ private:
                 &deviceCount,
                 devices.data()
             ) != VK_SUCCESS) {
+            logError(label_ + " surface setup failed: vkEnumeratePhysicalDevices");
             return false;
         }
 
@@ -917,15 +1096,17 @@ private:
         deviceInfo.pQueueCreateInfos = &queueInfo;
         deviceInfo.enabledExtensionCount = 1;
         deviceInfo.ppEnabledExtensionNames = &requiredExtension;
+        VkDevice device = VK_NULL_HANDLE;
         if (vkCreateDevice(
                 physicalDevice_,
                 &deviceInfo,
                 nullptr,
-                &device_
-            ) != VK_SUCCESS) {
+                &device
+            ) != VK_SUCCESS || device == VK_NULL_HANDLE) {
             logError("vkCreateDevice failed");
             return false;
         }
+        device_ = device;
         vkGetDeviceQueue(device_, queueFamily_, 0, &queue_);
         return queue_ != VK_NULL_HANDLE;
     }
@@ -937,6 +1118,7 @@ private:
                 surface_,
                 &capabilities
             ) != VK_SUCCESS) {
+            logError(label_ + " surface setup failed: vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
             return false;
         }
 
@@ -948,6 +1130,7 @@ private:
                 nullptr
             ) != VK_SUCCESS ||
             formatCount == 0) {
+            logError(label_ + " surface setup failed: no surface formats");
             return false;
         }
         std::vector<VkSurfaceFormatKHR> formats(formatCount);
@@ -957,6 +1140,7 @@ private:
                 &formatCount,
                 formats.data()
             ) != VK_SUCCESS) {
+            logError(label_ + " surface setup failed: vkGetPhysicalDeviceSurfaceFormatsKHR");
             return false;
         }
         auto preferred = std::find_if(
@@ -988,7 +1172,10 @@ private:
                 capabilities.maxImageExtent.height
             );
         }
-        if (extent_.width == 0 || extent_.height == 0) return false;
+        if (extent_.width == 0 || extent_.height == 0) {
+            logError(label_ + " surface setup failed: swapchain extent is empty");
+            return false;
+        }
 
         uint32_t imageCount = capabilities.minImageCount + 1;
         if (capabilities.maxImageCount > 0) {
@@ -1041,15 +1228,17 @@ private:
         swapchainInfo.compositeAlpha = compositeAlpha;
         swapchainInfo.presentMode = VK_PRESENT_MODE_FIFO_KHR;
         swapchainInfo.clipped = VK_TRUE;
+        VkSwapchainKHR swapchain = VK_NULL_HANDLE;
         if (vkCreateSwapchainKHR(
                 device_,
                 &swapchainInfo,
                 nullptr,
-                &swapchain_
-            ) != VK_SUCCESS) {
+                &swapchain
+            ) != VK_SUCCESS || swapchain == VK_NULL_HANDLE) {
             logError("vkCreateSwapchainKHR failed");
             return false;
         }
+        swapchain_ = swapchain;
 
         uint32_t actualImageCount = 0;
         if (vkGetSwapchainImagesKHR(
@@ -1059,6 +1248,7 @@ private:
                 nullptr
             ) != VK_SUCCESS ||
             actualImageCount == 0) {
+            logError(label_ + " surface setup failed: swapchain image count query");
             return false;
         }
         swapchainImages_.resize(actualImageCount);
@@ -1069,6 +1259,7 @@ private:
                 swapchainImages_.data()
             ) != VK_SUCCESS ||
             actualImageCount == 0) {
+            logError(label_ + " surface setup failed: swapchain image fetch");
             return false;
         }
         swapchainImages_.resize(actualImageCount);
@@ -1092,6 +1283,7 @@ private:
                     nullptr,
                     &view
                 ) != VK_SUCCESS) {
+                logError(label_ + " surface setup failed: vkCreateImageView");
                 return false;
             }
             swapchainImageViews_.push_back(view);
@@ -1133,6 +1325,7 @@ private:
                 nullptr,
                 &descriptorSetLayout_
             ) != VK_SUCCESS) {
+            logError(label_ + " surface setup failed: vkCreateDescriptorSetLayout");
             return false;
         }
 
@@ -1161,6 +1354,7 @@ private:
                 nullptr,
                 &descriptorPool_
             ) != VK_SUCCESS) {
+            logError(label_ + " surface setup failed: vkCreateDescriptorPool");
             return false;
         }
 
@@ -1175,6 +1369,7 @@ private:
                 &allocateInfo,
                 &descriptorSet_
             ) != VK_SUCCESS) {
+            logError(label_ + " surface setup failed: vkAllocateDescriptorSets");
             return false;
         }
         if (uniformData_.empty()) return true;
@@ -1198,6 +1393,7 @@ private:
                 uniformData_.data(),
                 uniformData_.size()
             )) {
+            logError(label_ + " surface setup failed: uniform buffer creation");
             return false;
         }
 
@@ -1363,19 +1559,29 @@ private:
         };
         inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
-        VkViewport viewport{};
-        viewport.width = static_cast<float>(extent_.width);
-        viewport.height = static_cast<float>(extent_.height);
-        viewport.minDepth = 0.0F;
-        viewport.maxDepth = 1.0F;
-        VkRect2D scissor{{0, 0}, extent_};
+        // Viewport and scissor are dynamic state. They are the only part of
+        // the pipeline that depends on the swapchain extent, and baking them
+        // in would mean recompiling the pipeline — shader modules and all —
+        // every time the surface is resized. On a foldable that happens on
+        // every fold, in front of the user.
         VkPipelineViewportStateCreateInfo viewportState{
             VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO
         };
         viewportState.viewportCount = 1;
-        viewportState.pViewports = &viewport;
+        viewportState.pViewports = nullptr;
         viewportState.scissorCount = 1;
-        viewportState.pScissors = &scissor;
+        viewportState.pScissors = nullptr;
+
+        const std::array<VkDynamicState, 2> dynamicStates{
+            VK_DYNAMIC_STATE_VIEWPORT,
+            VK_DYNAMIC_STATE_SCISSOR
+        };
+        VkPipelineDynamicStateCreateInfo dynamicState{
+            VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO
+        };
+        dynamicState.dynamicStateCount =
+            static_cast<uint32_t>(dynamicStates.size());
+        dynamicState.pDynamicStates = dynamicStates.data();
 
         VkPipelineRasterizationStateCreateInfo rasterizer{
             VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO
@@ -1425,6 +1631,7 @@ private:
             ) != VK_SUCCESS) {
             vkDestroyShaderModule(device_, vertexModule, nullptr);
             vkDestroyShaderModule(device_, fragmentModule, nullptr);
+            logError(label_ + " surface setup failed: vkCreatePipelineLayout");
             return false;
         }
 
@@ -1440,6 +1647,7 @@ private:
         pipelineInfo.pRasterizationState = &rasterizer;
         pipelineInfo.pMultisampleState = &multisampling;
         pipelineInfo.pColorBlendState = &colorBlending;
+        pipelineInfo.pDynamicState = &dynamicState;
         pipelineInfo.layout = pipelineLayout_;
         pipelineInfo.renderPass = renderPass_;
         pipelineInfo.subpass = 0;
@@ -1453,6 +1661,20 @@ private:
         );
         vkDestroyShaderModule(device_, vertexModule, nullptr);
         vkDestroyShaderModule(device_, fragmentModule, nullptr);
+        if (result != VK_SUCCESS) {
+            // The last unlabelled bail-out in the setSurface chain, and the
+            // one that actually fired: a stage declaring a descriptor with a
+            // type the set layout disagrees about (an attempt at a uniform
+            // block over a sampler binding, say) is rejected here rather than
+            // at module creation, so it looked like a swapchain failure with
+            // no native detail behind it. VkResult is logged numerically
+            // because the driver's own reason rarely reaches us.
+            logError(
+                label_ +
+                " surface setup failed: vkCreateGraphicsPipelines (VkResult " +
+                std::to_string(static_cast<int32_t>(result)) + ")"
+            );
+        }
         return result == VK_SUCCESS;
     }
 
@@ -1475,6 +1697,7 @@ private:
                     nullptr,
                     &framebuffer
                 ) != VK_SUCCESS) {
+                logError(label_ + " surface setup failed: vkCreateFramebuffer");
                 return false;
             }
             framebuffers_.push_back(framebuffer);
@@ -1494,6 +1717,7 @@ private:
                 nullptr,
                 &commandPool_
             ) != VK_SUCCESS) {
+            logError(label_ + " surface setup failed: vkCreateCommandPool");
             return false;
         }
 
@@ -1524,6 +1748,7 @@ private:
                 nullptr,
                 &imageAvailable_
             ) != VK_SUCCESS) {
+            logError(label_ + " surface setup failed: vkCreateSemaphore");
             return false;
         }
 
@@ -1538,6 +1763,7 @@ private:
                     nullptr,
                     &semaphore
                 ) != VK_SUCCESS) {
+                logError(label_ + " surface setup failed: vkCreateSemaphore");
                 return false;
             }
         }
@@ -1591,6 +1817,7 @@ private:
                 nullptr,
                 &buffer
             ) != VK_SUCCESS) {
+            logError(label_ + " surface setup failed: vkCreateBuffer");
             return false;
         }
 
@@ -1655,6 +1882,7 @@ private:
                 nullptr,
                 &texture.image
             ) != VK_SUCCESS) {
+            logError(label_ + " surface setup failed: vkCreateImage");
             return false;
         }
 
@@ -1680,6 +1908,7 @@ private:
                 nullptr,
                 &texture.memory
             ) != VK_SUCCESS) {
+            logError(label_ + " surface setup failed: vkAllocateMemory");
             return false;
         }
         return vkBindImageMemory(
@@ -1727,6 +1956,33 @@ private:
                     )
                 ) + 1U;
         }
+        // Same extent and mip chain as what is already bound: overwrite it in
+        // place. The clock face re-uploads the same fixed-size bitmap on every
+        // animation frame, and the full path below costs an image allocation,
+        // a view, a sampler, a descriptor write and a vkDeviceWaitIdle each
+        // time. Waiting on the render fence is enough here: every GPU read of
+        // this texture happens inside a render submission guarded by it, and
+        // uploads run on the same thread as render(), so nothing new can be
+        // submitted in between. If the in-place copy fails part-way the image
+        // is in an unknown layout, so fall through and replace it entirely.
+        TextureResource& bound = textures_[binding];
+        if (bound.ready &&
+            bound.image != VK_NULL_HANDLE &&
+            bound.width == width &&
+            bound.height == height &&
+            bound.mipLevels == replacement.mipLevels &&
+            (renderFence_ == VK_NULL_HANDLE ||
+             vkWaitForFences(
+                 device_,
+                 1,
+                 &renderFence_,
+                 VK_TRUE,
+                 std::numeric_limits<uint64_t>::max()
+             ) == VK_SUCCESS)) {
+            if (copyBufferToTexture(stagingBuffer, bound)) return true;
+            logError(label_ + " in-place texture update failed; reallocating");
+        }
+
         if (!createTextureImage(replacement) ||
             !copyBufferToTexture(stagingBuffer, replacement) ||
             !createTextureViewAndSampler(replacement)) {
@@ -1985,6 +2241,7 @@ private:
                 nullptr,
                 &texture.view
             ) != VK_SUCCESS) {
+            logError(label_ + " surface setup failed: vkCreateImageView");
             return false;
         }
 
@@ -2034,6 +2291,7 @@ private:
                 commandBuffer_,
                 &beginInfo
             ) != VK_SUCCESS) {
+            logError(label_ + " surface setup failed: vkBeginCommandBuffer");
             return false;
         }
         VkClearValue clearColor{};
@@ -2056,6 +2314,14 @@ private:
             VK_PIPELINE_BIND_POINT_GRAPHICS,
             pipeline_
         );
+        VkViewport viewport{};
+        viewport.width = static_cast<float>(extent_.width);
+        viewport.height = static_cast<float>(extent_.height);
+        viewport.minDepth = 0.0F;
+        viewport.maxDepth = 1.0F;
+        vkCmdSetViewport(commandBuffer_, 0, 1, &viewport);
+        const VkRect2D scissor{{0, 0}, extent_};
+        vkCmdSetScissor(commandBuffer_, 0, 1, &scissor);
         vkCmdBindDescriptorSets(
             commandBuffer_,
             VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -2232,6 +2498,18 @@ void destroyOnePass(JNIEnv* env, OnePassHandle handle) {
         engine->releaseAssetManagerRef(env);
     }
     delete engine;
+}
+
+std::string drainDiagnostics() {
+    std::lock_guard<std::mutex> guard(diagnosticsMutex());
+    std::deque<std::string>& buffer = diagnosticsBuffer();
+    std::string joined;
+    for (const std::string& entry : buffer) {
+        joined += entry;
+        joined += '\n';
+    }
+    buffer.clear();
+    return joined;
 }
 
 }  // namespace atmo::vulkan

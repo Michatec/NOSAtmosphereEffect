@@ -3,6 +3,12 @@ package com.app.nosatmosphereeffect.renderer
 import android.content.Context
 import android.graphics.Bitmap
 import android.util.Log
+import com.app.nosatmosphereeffect.helper.AtmosphereClockPolicy
+import com.app.nosatmosphereeffect.helper.ClockFramePump
+import com.app.nosatmosphereeffect.helper.ClockOverlayState
+import com.app.nosatmosphereeffect.helper.ClockPalette
+import com.app.nosatmosphereeffect.helper.ClockScreen
+import com.app.nosatmosphereeffect.helper.ClockScreenPolicy
 import com.app.nosatmosphereeffect.helper.GLWallpaperService
 import com.app.nosatmosphereeffect.helper.WallpaperRenderHost
 import com.app.nosatmosphereeffect.renderer.backend.BackendReselectableRenderer
@@ -15,6 +21,7 @@ import com.app.nosatmosphereeffect.renderer.vulkan.VulkanBackendChange
 import com.app.nosatmosphereeffect.renderer.vulkan.VulkanBackendResolution
 import com.app.nosatmosphereeffect.renderer.vulkan.VulkanBackendSelection
 import com.app.nosatmosphereeffect.renderer.vulkan.VulkanSupport
+import java.util.concurrent.Executors
 
 class AtmosphereRenderController(
     context: Context,
@@ -23,6 +30,17 @@ class AtmosphereRenderController(
     private val appContext = context.applicationContext
     private val effectId = if (reverse) "REVERSE" else "ORIGINAL"
     private val lock = Any()
+
+    /**
+     * Drives clock frames. One per controller, i.e. one per wallpaper engine
+     * — see ClockFramePump for why this must not be service-wide.
+     */
+    private val clockPump = ClockFramePump(appContext) { onClockTick() }
+    private val clockColorWorker = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "AtmoClockColor").apply { isDaemon = true }
+    }
+    @Volatile private var requestedClockColor: Int = AtmosphereClockPolicy.DEFAULT_COLOR
+    @Volatile private var resolvedAutoClockColor: Int? = null
 
     private var state = AtmosphereRenderState()
     private var engine: GLWallpaperService.GLEngine? = null
@@ -119,6 +137,115 @@ class AtmosphereRenderController(
         applyState(snapshot)
     }
 
+    /**
+     * The clock, configured separately from the effect's own settings.
+     *
+     * Split out when the clock stopped being Atmosphere-only: every other
+     * effect service now hands its controller the same [ClockOverlayState],
+     * and having one shape of call across all of them is worth more than
+     * keeping this controller's twelve extra parameters. The state is unpacked
+     * into the flat fields the renderers and the Vulkan host already read,
+     * rather than those being rewritten to match.
+     */
+    fun configureClock(clock: ClockOverlayState) {
+        val safe = clock.sanitized()
+        requestedClockColor = safe.requestedColor
+        val resolvedClock =
+            AtmosphereClockPolicy.resolveEnabled(effectId, safe.enabled)
+        // Collapsed here, once, rather than in each renderer: an effect that
+        // is only sharp on one side gets that side regardless of what is
+        // stored, so a preference carried over from another effect cannot put
+        // the clock somewhere it would be illegible.
+        val resolvedScreen = ClockScreenPolicy.resolveScreen(
+            effectId,
+            ClockScreen.fromId(safe.screenId)
+        )
+        val snapshot = synchronized(lock) {
+            state = state.copy(
+                clockEnabled = resolvedClock,
+                clockDepthEnabled = safe.depthEnabled,
+                clockStyleId = safe.styleId,
+                clockShowSeconds = safe.showSeconds,
+                clockAnimate = safe.animate,
+                clockCenterX = safe.centerX,
+                clockTop = safe.top,
+                clockHeight = safe.height,
+                clockWidthScale = safe.widthScale,
+                clockHeightScale = safe.heightScale,
+                clockOpacity = safe.opacity,
+                clockColor = ClockPalette.resolve(
+                    requestedClockColor,
+                    resolvedAutoClockColor
+                ),
+                clockHourFormat = safe.hourFormat,
+                clockScreenId = resolvedScreen.id,
+                clockLockedProgress = safe.lockedProgress,
+                clockUnlockedProgress = safe.unlockedProgress
+            ).sanitized()
+            state
+        }
+        applyState(snapshot)
+        clockPump.configure(resolvedClock, safe.showSeconds)
+        if (resolvedClock && ClockPalette.isAuto(requestedClockColor)) {
+            refreshAutoClockColor()
+        }
+    }
+
+    /**
+     * Forwarded from the wallpaper engine so the pump idles when hidden, and
+     * so the clock plays its entry animation when the wallpaper comes back.
+     *
+     * Both backends hold the request until the clock would actually be on
+     * screen, so becoming visible on the wrong side of the transition does
+     * not spend the animation invisibly.
+     */
+    fun setEngineVisible(visible: Boolean) {
+        clockPump.setVisible(visible)
+        if (!visible) return
+        val targets = synchronized(lock) {
+            Triple(openGlAtmosphere, openGlReverse, vulkanHost)
+        }
+        targets.first?.beginClockEntry()
+        targets.second?.beginClockEntry()
+        targets.third?.beginClockEntry()
+    }
+
+    /**
+     * Re-derives the wallpaper-tinted clock colour off the main thread, then
+     * pushes it if it actually changed. Extraction decodes and runs Palette,
+     * so it must not happen on the render or main thread.
+     */
+    private fun refreshAutoClockColor() {
+        val submitted = runCatching {
+            clockColorWorker.execute {
+                val derived = ClockPalette.autoColorFor(appContext) ?: return@execute
+                if (derived == resolvedAutoClockColor) return@execute
+                resolvedAutoClockColor = derived
+                if (!ClockPalette.isAuto(requestedClockColor)) return@execute
+                val snapshot = synchronized(lock) {
+                    if (closed) return@execute
+                    state = state.copy(clockColor = derived).sanitized()
+                    state
+                }
+                applyState(snapshot)
+                synchronized(lock) { engine }?.requestRender()
+            }
+        }
+        if (submitted.isFailure) {
+            Log.w(TAG, "Could not schedule clock colour extraction")
+        }
+    }
+
+    private fun onClockTick() {
+        val targets = synchronized(lock) {
+            Triple(openGlAtmosphere, openGlReverse, vulkanHost)
+        }
+        targets.first?.onTimeChanged()
+        targets.second?.onClockTimeChanged()
+        targets.third?.onTimeChanged()
+        synchronized(lock) { engine }?.requestRender()
+    }
+
     fun setProgress(progress: Float) {
         val snapshot = synchronized(lock) {
             state = state.copy(progress = progress).sanitized()
@@ -155,6 +282,9 @@ class AtmosphereRenderController(
     }
 
     fun reloadTexture() {
+        // The image is changing, so any wallpaper-derived clock tint is stale.
+        ClockPalette.invalidateAutoColor()
+        if (ClockPalette.isAuto(requestedClockColor)) refreshAutoClockColor()
         val targets = synchronized(lock) {
             Triple(openGlAtmosphere, openGlReverse, vulkanHost)
         }
@@ -183,6 +313,8 @@ class AtmosphereRenderController(
     }
 
     fun release() {
+        clockPump.close()
+        clockColorWorker.shutdownNow()
         val targets: RenderTargets
         val session: RendererRuntimeSession?
         synchronized(lock) {
@@ -442,15 +574,20 @@ class AtmosphereRenderController(
                 applyState(snapshot)
                 onRenderRetryRequested = engine::requestRender
                 onSubjectMaskUpdated = engine::requestRender
+                onAnimationFrameRequested = engine::requestRender
             }
         } else {
             AtmosphereRenderer(appContext).apply {
                 applyState(snapshot)
                 onRenderRetryRequested = engine::requestRender
                 onSubjectMaskUpdated = engine::requestRender
+                onAnimationFrameRequested = engine::requestRender
             }
         }
     }
+
+    /** Kept for callers outside the pump (config updates, wallpaper swaps). */
+    fun onSystemTimeChanged() = onClockTick()
 
     private fun applyState(snapshot: AtmosphereRenderState) {
         val targets = synchronized(lock) {
@@ -472,7 +609,23 @@ class AtmosphereRenderController(
         atmosphereGlassEnabled = state.glassEnabled
         glassLineCount = state.glassLineCount
         glassLineThickness = state.glassLineThickness
-        configureGlassBackgroundOnly(state.glassBackgroundOnly)
+        glassBackgroundOnly = state.glassBackgroundOnly
+        configureSubjectIsolation(state.needsSubjectMask())
+        clockEnabled = state.clockEnabled
+        clockDepthEnabled = state.clockDepthEnabled
+        clockStyle = state.clockStyle
+        clockShowSeconds = state.clockShowSeconds
+        clockAnimate = state.clockAnimate
+        clockColor = state.clockColor
+        clockHourFormat = state.clockHourFormat
+        clockCenterX = state.clockCenterX
+        clockTop = state.clockTop
+        clockHeight = state.clockHeight
+        clockLayout = state.clockOverlay()
+        clockOpacity = state.clockOpacity
+        clockScreen = state.clockScreen
+        clockLockedProgress = state.clockLockedProgress
+        clockUnlockedProgress = state.clockUnlockedProgress
     }
 
     private fun BlurToSharpRenderer.applyState(state: AtmosphereRenderState) {
@@ -487,6 +640,9 @@ class AtmosphereRenderController(
         glassLineCount = state.glassLineCount
         glassLineThickness = state.glassLineThickness
         configureGlassBackgroundOnly(state.glassBackgroundOnly)
+        // Reverse Atmosphere gets the clock through the shared overlay rather
+        // than the flat fields the forward renderer uses.
+        applyClockState(state.clockOverlay())
         setDrawerBlurred(state.drawerBlur > 0.5f)
     }
 

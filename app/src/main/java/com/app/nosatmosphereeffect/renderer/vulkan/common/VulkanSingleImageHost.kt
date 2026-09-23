@@ -14,6 +14,7 @@ import com.app.nosatmosphereeffect.renderer.vulkan.VulkanApiVersion
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 internal abstract class VulkanSingleImageHost<State : Any>(
     context: Context,
@@ -155,8 +156,15 @@ internal abstract class VulkanSingleImageHost<State : Any>(
 
     override fun onSurfaceDestroyed(holder: SurfaceHolder) {
         clearSurfaceReference()
-        postIfActive {
+        // SurfaceHolder.Callback requires the render thread to stop touching
+        // the surface before this callback returns; the framework tears the
+        // BufferQueue down right after. Posting asynchronously let an
+        // in-flight setSurface() build a swapchain on an abandoned window.
+        val completed = runSynchronouslyIfActive(SURFACE_DESTROY_TIMEOUT_MS) {
             destroySurfaceOnWorker(propagateFailure = false)
+        }
+        if (!completed) {
+            Log.w(TAG, "Timed out waiting for the ${bridge.effectLabel} surface release")
         }
     }
 
@@ -569,6 +577,46 @@ internal abstract class VulkanSingleImageHost<State : Any>(
         }
     }
 
+    /**
+     * Runs [action] on the worker and waits at most [timeoutMs] for it. Returns
+     * false only when the wait timed out; worker failures are logged, not thrown.
+     */
+    private fun runSynchronouslyIfActive(timeoutMs: Long, action: () -> Unit): Boolean {
+        if (closed.get() || failed.get()) return true
+        if (Looper.myLooper() == renderThread.looper) {
+            runCatching(action).onFailure { failure ->
+                Log.w(TAG, "Unable to release the ${bridge.effectLabel} surface", failure)
+            }
+            return true
+        }
+        val completion = CountDownLatch(1)
+        val accepted = worker.post {
+            try {
+                if (!closed.get() && !failed.get()) action()
+            } catch (failure: Throwable) {
+                Log.w(TAG, "Unable to release the ${bridge.effectLabel} surface", failure)
+            } finally {
+                completion.countDown()
+            }
+        }
+        if (!accepted) return true
+        var interrupted = false
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs)
+        var completed = false
+        while (true) {
+            try {
+                val remaining = deadline - System.nanoTime()
+                completed = remaining > 0 &&
+                    completion.await(remaining, TimeUnit.NANOSECONDS)
+                break
+            } catch (_: InterruptedException) {
+                interrupted = true
+            }
+        }
+        if (interrupted) Thread.currentThread().interrupt()
+        return completed
+    }
+
     private fun runSynchronouslyIfActive(action: () -> Unit) {
         if (closed.get() || failed.get()) return
         if (Looper.myLooper() == renderThread.looper) {
@@ -692,5 +740,6 @@ internal abstract class VulkanSingleImageHost<State : Any>(
         const val NO_GENERATION = -1L
         const val DEFAULT_SCROLL_OFFSET = 0.5f
         const val MIN_SCROLL_WINDOW = 0.001f
+        const val SURFACE_DESTROY_TIMEOUT_MS = 3_000L
     }
 }

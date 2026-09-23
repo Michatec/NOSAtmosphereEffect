@@ -43,6 +43,26 @@ abstract class ColorFillWallpaperService protected constructor(
             originX = preferences.getFloat("origin_x", 0.5f),
             originY = preferences.getFloat("origin_y", 0.8f)
         )
+        // Playlist and theme modes rotate the image underneath the clock, so
+        // the clock stays off there — a position calibrated against one photo
+        // is wrong for the next. See AtmosphereClockPolicy.resolveEnabled.
+        renderer.configureClock(
+            readClockState(preferences)
+        )
+    }
+
+    /**
+     * The clock's frame cadence is owned by the controller's ClockFramePump,
+     * one per engine. This only tells it when to idle: a live wallpaper
+     * service can have a settings-preview engine and the real wallpaper alive
+     * at once, so anything service-wide would be torn down by whichever engine
+     * happened to die first.
+     */
+    final override fun onEngineVisibilityChanged(
+        renderer: ColorFillRenderController?,
+        visible: Boolean
+    ) {
+        renderer?.setEngineVisible(visible)
     }
 
     final override fun setEffectProgress(renderer: ColorFillRenderController, progress: Float) {
@@ -99,6 +119,26 @@ abstract class FrostedWallpaperService protected constructor(
             noiseStrength = preferences.getFloat("noise_strength", 0.06f),
             blurRadius = preferences.getFloat("frosted_blur_radius", 200f)
         )
+        // Playlist and theme modes rotate the image underneath the clock, so
+        // the clock stays off there — a position calibrated against one photo
+        // is wrong for the next. See AtmosphereClockPolicy.resolveEnabled.
+        renderer.configureClock(
+            readClockState(preferences)
+        )
+    }
+
+    /**
+     * The clock's frame cadence is owned by the controller's ClockFramePump,
+     * one per engine. This only tells it when to idle: a live wallpaper
+     * service can have a settings-preview engine and the real wallpaper alive
+     * at once, so anything service-wide would be torn down by whichever engine
+     * happened to die first.
+     */
+    final override fun onEngineVisibilityChanged(
+        renderer: FrostedRenderController?,
+        visible: Boolean
+    ) {
+        renderer?.setEngineVisible(visible)
     }
 
     final override fun setEffectProgress(
@@ -165,6 +205,26 @@ abstract class HalftoneWallpaperService protected constructor(
                 false
             )
         )
+        // Playlist and theme modes rotate the image underneath the clock, so
+        // the clock stays off there — a position calibrated against one photo
+        // is wrong for the next. See AtmosphereClockPolicy.resolveEnabled.
+        renderer.configureClock(
+            readClockState(preferences)
+        )
+    }
+
+    /**
+     * The clock's frame cadence is owned by the controller's ClockFramePump,
+     * one per engine. This only tells it when to idle: a live wallpaper
+     * service can have a settings-preview engine and the real wallpaper alive
+     * at once, so anything service-wide would be torn down by whichever engine
+     * happened to die first.
+     */
+    final override fun onEngineVisibilityChanged(
+        renderer: HalftoneRenderController?,
+        visible: Boolean
+    ) {
+        renderer?.setEngineVisible(visible)
     }
 
     final override fun setEffectProgress(
@@ -226,6 +286,26 @@ abstract class NeonWallpaperService protected constructor(
                 false
             )
         )
+        // Playlist and theme modes rotate the image underneath the clock, so
+        // the clock stays off there — a position calibrated against one photo
+        // is wrong for the next. See AtmosphereClockPolicy.resolveEnabled.
+        renderer.configureClock(
+            readClockState(preferences)
+        )
+    }
+
+    /**
+     * The clock's frame cadence is owned by the controller's ClockFramePump,
+     * one per engine. This only tells it when to idle: a live wallpaper
+     * service can have a settings-preview engine and the real wallpaper alive
+     * at once, so anything service-wide would be torn down by whichever engine
+     * happened to die first.
+     */
+    final override fun onEngineVisibilityChanged(
+        renderer: NeonRenderController?,
+        visible: Boolean
+    ) {
+        renderer?.setEngineVisible(visible)
     }
 
     final override fun setEffectProgress(

@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 
 internal data class EffectTiming(
@@ -22,6 +23,8 @@ internal class WallpaperEventController(
     private val isKeyguardLocked: () -> Boolean,
     private val onUnlock: () -> Unit,
     private val onPrepareForLock: () -> Unit,
+    private val onShowLocked: () -> Unit,
+    private val onResumeHome: () -> Unit,
     private val onScreenOff: () -> Unit,
     private val onReload: () -> Unit,
     private val onConfigUpdate: () -> Unit
@@ -31,18 +34,35 @@ internal class WallpaperEventController(
     private var closed = false
     private var systemReceiverRegistered = false
     private var appReceiverRegistered = false
+    private var lastUnlockUptimeMs = NEVER_UNLOCKED
+
+    /**
+     * True while a locked keyguard reading arrived so soon after an unlock that
+     * it is probably the OS settling (screen-off fingerprint unlock on some
+     * skins reports the keyguard, visibility and screen events out of order).
+     * The locked visuals are withheld until [confirmLocked] re-checks.
+     */
+    private var lockVisualDeferred = false
 
     private val prepareForLock = Runnable {
         runCallback("prepare the next unlock", onPrepareForLock)
+    }
+
+    private val confirmLocked = Runnable {
+        if (closed || !locked) return@Runnable
+        if (isKeyguardLocked()) {
+            lockVisualDeferred = false
+            runCallback("show the lock-screen state", onShowLocked)
+        } else {
+            completeUnlock()
+        }
     }
 
     private val unlockChecker = object : Runnable {
         override fun run() {
             if (closed) return
             if (!isKeyguardLocked()) {
-                locked = false
-                runCallback("play the unlock animation", onUnlock)
-                handler.removeCallbacks(this)
+                completeUnlock()
             } else {
                 handler.postDelayed(this, timing().pollIntervalMs)
             }
@@ -79,13 +99,48 @@ internal class WallpaperEventController(
         locked = value
         if (!value) {
             handler.removeCallbacks(unlockChecker)
+            handler.removeCallbacks(confirmLocked)
+            lockVisualDeferred = false
         }
+    }
+
+    /** True shortly after an unlock, while the OS may still emit stale events. */
+    fun isSettlingAfterUnlock(): Boolean {
+        return !locked && SystemClock.uptimeMillis() - lastUnlockUptimeMs < UNLOCK_SETTLE_MS
+    }
+
+    /**
+     * Reconciles the wallpaper becoming visible with the keyguard when
+     * transitions are enabled, choosing exactly one of the unlock animation,
+     * the locked state or the settled home state.
+     */
+    fun onVisible(keyguardLocked: Boolean) {
+        if (closed) return
+        if (!keyguardLocked) {
+            if (locked) {
+                // Still showing the locked state (e.g. the screen woke already
+                // unlocked): animate once instead of snapping.
+                completeUnlock()
+            } else {
+                runCallback("show the home-screen state", onResumeHome)
+            }
+            return
+        }
+        if (isSettlingAfterUnlock()) {
+            deferLockVisual()
+        } else if (!lockVisualDeferred) {
+            locked = true
+            runCallback("show the lock-screen state", onShowLocked)
+        }
+        startUnlockPolling()
     }
 
     fun onTransitionModeChanged() {
         if (transitionsEnabled()) return
         handler.removeCallbacks(unlockChecker)
         handler.removeCallbacks(prepareForLock)
+        handler.removeCallbacks(confirmLocked)
+        lockVisualDeferred = false
     }
 
     fun close() {
@@ -93,6 +148,7 @@ internal class WallpaperEventController(
         closed = true
         handler.removeCallbacks(unlockChecker)
         handler.removeCallbacks(prepareForLock)
+        handler.removeCallbacks(confirmLocked)
         unregisterSystemReceiver()
         unregisterAppReceiver()
     }
@@ -101,8 +157,16 @@ internal class WallpaperEventController(
         if (closed) return
         handler.removeCallbacks(unlockChecker)
         if (transitionsEnabled()) {
-            locked = true
-            handler.post(unlockChecker)
+            val keyguardLocked = isKeyguardLocked()
+            // USER_PRESENT or a visibility change may already have played the
+            // unlock; forcing `locked` here replayed it from the locked state.
+            if (!locked && !keyguardLocked) return
+            if (!locked && isSettlingAfterUnlock()) {
+                deferLockVisual()
+            } else {
+                locked = true
+            }
+            startUnlockPolling()
         } else {
             locked = isKeyguardLocked()
             if (locked) {
@@ -117,6 +181,9 @@ internal class WallpaperEventController(
         if (closed) return
         handler.removeCallbacks(unlockChecker)
         handler.removeCallbacks(prepareForLock)
+        handler.removeCallbacks(confirmLocked)
+        lockVisualDeferred = false
+        lastUnlockUptimeMs = NEVER_UNLOCKED
         locked = true
         if (transitionsEnabled()) {
             handler.postDelayed(prepareForLock, timing().lockDelayMs)
@@ -130,9 +197,41 @@ internal class WallpaperEventController(
         if (closed) return
         handler.removeCallbacks(prepareForLock)
         if (!locked) return
-        locked = false
+        completeUnlock()
+    }
+
+    private fun startUnlockPolling() {
         handler.removeCallbacks(unlockChecker)
-        runCallback("play the unlock animation", onUnlock)
+        handler.post(unlockChecker)
+    }
+
+    private fun deferLockVisual() {
+        locked = true
+        lockVisualDeferred = true
+        handler.removeCallbacks(confirmLocked)
+        handler.postDelayed(confirmLocked, LOCK_CONFIRM_DELAY_MS)
+    }
+
+    /**
+     * Single exit from the locked state. Cancels every pending lock-side
+     * callback (including a lock delay that has not fired yet), then plays the
+     * unlock animation only if the locked state was actually shown.
+     */
+    private fun completeUnlock() {
+        val lockVisualWasShown = !lockVisualDeferred
+        locked = false
+        lockVisualDeferred = false
+        lastUnlockUptimeMs = SystemClock.uptimeMillis()
+        handler.removeCallbacks(unlockChecker)
+        handler.removeCallbacks(confirmLocked)
+        handler.removeCallbacks(prepareForLock)
+        if (!transitionsEnabled()) {
+            runCallback("show the fixed home-screen state", onUnlock)
+        } else if (lockVisualWasShown) {
+            runCallback("play the unlock animation", onUnlock)
+        } else {
+            runCallback("show the home-screen state", onResumeHome)
+        }
     }
 
     private fun registerSystemReceiver() {
@@ -191,6 +290,9 @@ internal class WallpaperEventController(
     }
 
     private companion object {
+        const val NEVER_UNLOCKED = Long.MIN_VALUE / 2
+        const val UNLOCK_SETTLE_MS = 1_500L
+        const val LOCK_CONFIRM_DELAY_MS = 400L
         const val ACTION_RELOAD_WALLPAPER = "com.app.nosatmosphereeffect.RELOAD_WALLPAPER"
         const val ACTION_UPDATE_CONFIG = "com.app.nosatmosphereeffect.UPDATE_CONFIG"
     }

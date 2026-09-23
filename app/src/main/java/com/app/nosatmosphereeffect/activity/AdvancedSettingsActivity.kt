@@ -15,6 +15,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.core.content.edit
+import com.app.nosatmosphereeffect.helper.AtmosphereClockPolicy
+import com.app.nosatmosphereeffect.helper.ClockScreen
+import com.app.nosatmosphereeffect.helper.ClockScreenPolicy
 import com.app.nosatmosphereeffect.helper.AtmosphereGlassPolicy
 import com.app.nosatmosphereeffect.helper.CanvasSubjectSettings
 import com.app.nosatmosphereeffect.helper.GlassEffectPreferences
@@ -59,6 +62,9 @@ class AdvancedSettingsActivity : ComponentActivity() {
         val isFrosted = activeEffect.contains("FROSTED")
         val isGlass = activeEffect.contains("GLASS")
         val isAtmosphere = AtmosphereGlassPolicy.supportsEffect(activeEffect)
+        // Every effect composites the clock now, on both backends, so this is
+        // no longer an Atmosphere-only question.
+        val supportsClock = AtmosphereClockPolicy.supportsEffect(activeEffect)
         val showNoiseSwitch = !isHalftone && !isColorFill && !isNeon && !isGlass
         val showBlob = activeEffect == "ORIGINAL" || activeEffect == "REVERSE"
         val usesSubjectModel = isNeon || isGlass || isHalftone || isAtmosphere
@@ -70,6 +76,17 @@ class AdvancedSettingsActivity : ComponentActivity() {
 
         val prefs = getSharedPreferences("app_prefs", MODE_PRIVATE)
         val wpPrefs = getSharedPreferences("wallpaper_prefs", Context.MODE_PRIVATE)
+        val storedClockScreen = ClockScreen.fromId(
+            prefs.readString(
+                AtmosphereClockPolicy.SCREEN_KEY,
+                ClockScreenPolicy.defaultScreen(activeEffect).id
+            )
+        )
+        // Collapsed against what this effect can actually show, so a choice
+        // carried over from Colour Fill cannot leave Frosted claiming a
+        // home-screen clock it would never draw.
+        val resolvedClockScreen =
+            ClockScreenPolicy.resolveScreen(activeEffect, storedClockScreen)
         val glassSettings = GlassEffectPreferences.readAndMigrate(prefs)
         val behaviorSettings = WallpaperBehaviorPreferences.read(this)
 
@@ -95,6 +112,17 @@ class AdvancedSettingsActivity : ComponentActivity() {
                 prefs.readBoolean(AtmosphereGlassPolicy.ENABLED_KEY, false)
             ),
             glassReverse = activeEffect == "GLASS_REVERSE",
+            showClockToggle = supportsClock,
+            clockEnabled = AtmosphereClockPolicy.resolveEnabled(
+                activeEffect,
+                prefs.readBoolean(AtmosphereClockPolicy.ENABLED_KEY, false)
+            ),
+            clockDepthEnabled = prefs.readBoolean(
+                AtmosphereClockPolicy.DEPTH_KEY,
+                AtmosphereClockPolicy.DEFAULT_DEPTH
+            ),
+            clockOffersScreenChoice = ClockScreenPolicy.offersChoice(activeEffect),
+            clockScreenId = resolvedClockScreen.id,
             showNoiseSwitch = showNoiseSwitch,
             showBlob = showBlob,
             isPlaylistMode = isPlaylistMode,
@@ -189,7 +217,8 @@ class AdvancedSettingsActivity : ComponentActivity() {
                             defaultPoll,
                             defaultDelay,
                             defaultDuration,
-                            updateAtmosphereGlass = isAtmosphere
+                            updateAtmosphereGlass = isAtmosphere,
+                            updateAtmosphereClock = supportsClock
                         )
                     },
                     onReset = { resetSettings(prefs) },
@@ -206,7 +235,8 @@ class AdvancedSettingsActivity : ComponentActivity() {
         defaultPoll: Long,
         defaultDelay: Long,
         defaultDuration: Long,
-        updateAtmosphereGlass: Boolean
+        updateAtmosphereGlass: Boolean,
+        updateAtmosphereClock: Boolean
     ) {
         val poll = result.poll.toLongOrNull() ?: defaultPoll
         val delay = result.delay.toLongOrNull() ?: defaultDelay
@@ -247,6 +277,21 @@ class AdvancedSettingsActivity : ComponentActivity() {
                 putBoolean(
                     AtmosphereGlassPolicy.ENABLED_KEY,
                     result.atmosphereGlassEnabled
+                )
+            }
+            if (updateAtmosphereClock) {
+                putBoolean(AtmosphereClockPolicy.ENABLED_KEY, result.clockEnabled)
+                putBoolean(
+                    AtmosphereClockPolicy.DEPTH_KEY,
+                    result.clockDepthEnabled
+                )
+                // Stored raw. Effects that cannot honour a side collapse it on
+                // read (ClockScreenPolicy.resolveScreen), so switching from
+                // Colour Fill to Frosted and back does not lose the "both"
+                // the user picked.
+                putString(
+                    AtmosphereClockPolicy.SCREEN_KEY,
+                    ClockScreenPolicy.sanitizeScreenId(result.clockScreenId)
                 )
             }
             putInt(
@@ -306,6 +351,7 @@ class AdvancedSettingsActivity : ComponentActivity() {
             remove("neon_sensitivity")
             remove("neon_line_width")
             remove(AtmosphereGlassPolicy.ENABLED_KEY)
+            AtmosphereClockPolicy.ALL_KEYS.forEach { remove(it) }
             remove(GlassEffectPolicy.LINE_COUNT_KEY)
             remove(GlassEffectPolicy.LINE_THICKNESS_KEY)
             remove(GlassEffectPolicy.TRANSITION_STYLE_KEY)
@@ -336,6 +382,14 @@ class AdvancedSettingsActivity : ComponentActivity() {
             getFloat(key, fallback)
         } catch (failure: ClassCastException) {
             Log.w(TAG, "Preference '$key' has the wrong type; using $fallback", failure)
+            fallback
+        }
+    }
+
+    private fun SharedPreferences.readString(key: String, fallback: String): String {
+        return try {
+            getString(key, fallback) ?: fallback
+        } catch (_: ClassCastException) {
             fallback
         }
     }

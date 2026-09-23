@@ -1,5 +1,11 @@
 package com.app.nosatmosphereeffect.renderer
 
+import com.app.nosatmosphereeffect.helper.AtmosphereClockPolicy
+import com.app.nosatmosphereeffect.helper.ClockOverlayState
+import com.app.nosatmosphereeffect.helper.ClockPalette
+import com.app.nosatmosphereeffect.helper.ClockScreen
+import com.app.nosatmosphereeffect.helper.ClockScreenPolicy
+import com.app.nosatmosphereeffect.helper.ClockStyle
 import com.app.nosatmosphereeffect.helper.GlassEffectPolicy
 
 data class AtmosphereBlobFrame(
@@ -59,6 +65,51 @@ data class AtmosphereRenderState(
     val drawerBlur: Float = 0f,
     val scrollOffsetX: Float = 0.5f,
     val scrollWindowX: Float = 1f,
+    val clockEnabled: Boolean = false,
+    /**
+     * The clock's own depth switch. Independent of [glassBackgroundOnly]:
+     * both request a subject mask, but either can ask for one on its own.
+     */
+    val clockDepthEnabled: Boolean = AtmosphereClockPolicy.DEFAULT_DEPTH,
+    val clockStyleId: String = ClockStyle.DEFAULT.id,
+    val clockShowSeconds: Boolean = AtmosphereClockPolicy.DEFAULT_SECONDS,
+    val clockAnimate: Boolean = AtmosphereClockPolicy.DEFAULT_ANIMATE,
+    val clockCenterX: Float = AtmosphereClockPolicy.DEFAULT_CENTER_X,
+    val clockTop: Float = AtmosphereClockPolicy.DEFAULT_TOP,
+    val clockHeight: Float = AtmosphereClockPolicy.DEFAULT_HEIGHT,
+    /** Per-axis stretch on top of [clockHeight]; 1.0 is a no-op. */
+    val clockWidthScale: Float = AtmosphereClockPolicy.DEFAULT_WIDTH_SCALE,
+    val clockHeightScale: Float = AtmosphereClockPolicy.DEFAULT_HEIGHT_SCALE,
+    val clockOpacity: Float = AtmosphereClockPolicy.DEFAULT_OPACITY,
+    /**
+     * Already-resolved ARGB glyph colour — never [ClockPalette.AUTO]. The
+     * controller turns the stored preference (which may be AUTO) into a
+     * concrete colour, so neither renderer has to know about wallpaper
+     * extraction.
+     */
+    val clockColor: Int = ClockPalette.DEFAULT_FALLBACK,
+    /** "system", "12" or "24" — see AtmosphereClockPolicy.hourFormatOverride. */
+    val clockHourFormat: String = AtmosphereClockPolicy.DEFAULT_HOUR_FORMAT,
+    /** "lock", "home" or "both" — already resolved against the effect. */
+    val clockScreenId: String = ClockScreen.DEFAULT.id,
+    /**
+     * The effect's own shader progress at each end of the transition, copied
+     * from the wallpaper service. Effects disagree about which end is the
+     * lock screen (Atmosphere locks at 0, Reverse Atmosphere at 1), so the
+     * clock cannot read [progress] directly — see ClockScreenPolicy.
+     */
+    val clockLockedProgress: Float = 0f,
+    val clockUnlockedProgress: Float = 1f,
+    // Vulkan-only, dynamic (like hasSubject/blobs below): the clock
+    // bitmap's width/height ratio, refreshed whenever a fresh face is
+    // rendered, so the shader can size the clock quad without a native
+    // round-trip. Unused on the GLES path (AtmosphereRenderer reads this
+    // from ClockTextureProvider directly).
+    val clockTextureAspect: Float = 1f,
+    // Vulkan-only, dynamic: set once the worker has uploaded a real clock
+    // face. Until then the shader must not sample the clock binding — see
+    // clockMeta.y in vulkan_atmosphere_jni.cpp.
+    val clockFaceUploaded: Boolean = false,
     val blobs: AtmosphereBlobFrame = AtmosphereBlobFrame()
 ) {
     fun sanitized(): AtmosphereRenderState {
@@ -77,9 +128,91 @@ data class AtmosphereRenderState(
             drawerBlur = drawerBlur.finiteOr(0f).coerceIn(0f, 1f),
             scrollOffsetX = scrollOffsetX.finiteOr(0.5f).coerceIn(0f, 1f),
             scrollWindowX = scrollWindowX.finiteOr(1f).coerceIn(MIN_SCROLL_WINDOW, 1f),
+            clockStyleId = AtmosphereClockPolicy.sanitizeStyleId(clockStyleId),
+            clockCenterX = AtmosphereClockPolicy.sanitizeCenterX(clockCenterX),
+            clockTop = AtmosphereClockPolicy.sanitizeTop(clockTop),
+            clockHeight = AtmosphereClockPolicy.sanitizeHeight(clockHeight),
+            clockWidthScale =
+                AtmosphereClockPolicy.sanitizeAxisScale(clockWidthScale),
+            clockHeightScale =
+                AtmosphereClockPolicy.sanitizeAxisScale(clockHeightScale),
+            clockOpacity = AtmosphereClockPolicy.sanitizeOpacity(clockOpacity),
+            clockColor = clockColor or (0xFF shl 24),
+            clockHourFormat = AtmosphereClockPolicy.sanitizeHourFormat(clockHourFormat),
+            clockScreenId = ClockScreenPolicy.sanitizeScreenId(clockScreenId),
+            clockLockedProgress = clockLockedProgress.finiteOr(0f),
+            clockUnlockedProgress = clockUnlockedProgress.finiteOr(1f),
+            clockTextureAspect = clockTextureAspect.finiteOr(1f).coerceIn(0.05f, 20f),
             blobs = blobs.sanitized()
         )
     }
+
+    /**
+     * Whether anything on screen needs the subject mask. Glass's
+     * background-only mode and the clock's depth effect are separate user
+     * settings that happen to share the same expensive input, so the mask is
+     * computed when either wants it and skipped when neither does.
+     */
+    fun needsSubjectMask(): Boolean {
+        return (glassEnabled && glassBackgroundOnly) ||
+            (clockEnabled && clockDepthEnabled)
+    }
+
+    val clockStyle: ClockStyle
+        get() = ClockStyle.fromId(clockStyleId)
+
+    val clockScreen: ClockScreen
+        get() = ClockScreen.fromId(clockScreenId)
+
+    /**
+     * How strongly the clock should be drawn right now, 0..1, with the
+     * user's opacity already folded in. Both backends read this rather than
+     * computing their own curve, which is what keeps them agreeing.
+     */
+    fun effectiveClockOpacity(): Float {
+        if (!clockEnabled) return 0f
+        return clockOpacity * ClockScreenPolicy.visibility(
+            screen = clockScreen,
+            progress = progress,
+            lockedProgress = clockLockedProgress,
+            unlockedProgress = clockUnlockedProgress
+        )
+    }
+
+    /**
+     * The clock settings as the shared [ClockOverlayState] the other effects
+     * carry.
+     *
+     * Atmosphere keeps its flat fields — they are load-bearing for its Vulkan
+     * host and its unit tests, and rewriting working code to match a newer
+     * convention is how working code stops working. This bridges the two so
+     * BlurToSharpRenderer can use the same GlesClockOverlay as everything
+     * else instead of a seventh hand-written copy of the compositing rules.
+     *
+     * [clockColor] is already resolved by the controller, so it stands in for
+     * both the request and the result.
+     */
+    fun clockOverlay(): ClockOverlayState = ClockOverlayState(
+        enabled = clockEnabled,
+        depthEnabled = clockDepthEnabled,
+        styleId = clockStyleId,
+        showSeconds = clockShowSeconds,
+        animate = clockAnimate,
+        centerX = clockCenterX,
+        top = clockTop,
+        height = clockHeight,
+        widthScale = clockWidthScale,
+        heightScale = clockHeightScale,
+        opacity = clockOpacity,
+        requestedColor = clockColor,
+        color = clockColor,
+        hourFormat = clockHourFormat,
+        screenId = clockScreenId,
+        lockedProgress = clockLockedProgress,
+        unlockedProgress = clockUnlockedProgress,
+        textureAspect = clockTextureAspect,
+        faceUploaded = clockFaceUploaded
+    )
 
     private fun Float.finiteOr(fallback: Float): Float {
         return if (isFinite()) this else fallback

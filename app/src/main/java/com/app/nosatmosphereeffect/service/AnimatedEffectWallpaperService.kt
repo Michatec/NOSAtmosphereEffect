@@ -12,8 +12,12 @@ import android.os.PowerManager
 import android.util.Log
 import android.view.SurfaceHolder
 import android.view.animation.LinearInterpolator
+import com.app.nosatmosphereeffect.helper.ClockOverlayState
+import com.app.nosatmosphereeffect.helper.ClockPreferences
+import com.app.nosatmosphereeffect.helper.ClockScreen
 import com.app.nosatmosphereeffect.helper.GLWallpaperService
 import com.app.nosatmosphereeffect.helper.EffectStatePolicy
+import com.app.nosatmosphereeffect.helper.PlaylistModeManager
 import com.app.nosatmosphereeffect.helper.PlaylistRotationController
 import com.app.nosatmosphereeffect.helper.WallpaperBehaviorPolicy
 import com.app.nosatmosphereeffect.helper.WallpaperBehaviorPreferences
@@ -56,7 +60,59 @@ abstract class AnimatedEffectWallpaperService<R : Any> : GLWallpaperService() {
 
     protected open fun onRendererAttached(renderer: R, requestRender: () -> Unit) = Unit
 
+    /**
+     * Called on every engine visibility change, before the transition-specific
+     * handling below. Subclasses use it to idle work that only matters while
+     * the wallpaper is on screen.
+     */
+    protected open fun onEngineVisibilityChanged(renderer: R?, visible: Boolean) = Unit
+
     protected open fun releaseRenderer(renderer: R) = Unit
+
+    /**
+     * True while [configureRenderer] runs for a preview engine.
+     *
+     * A service hosts several engines — the wallpaper picker's preview and the
+     * live wallpaper can exist at once — so this cannot be a lasting flag. It
+     * is set immediately around the call and read only from [readClockState],
+     * both on the engine's main thread, so the two engines cannot interleave
+     * inside it.
+     */
+    @Volatile
+    private var configuringPreviewEngine = false
+
+    /**
+     * The clock settings for this effect, with the one preview-only
+     * difference: in a preview the keyguard is not locked, so a lock-screen
+     * clock would fade to nothing and the wallpaper picker would show no clock
+     * at all while the user is setting it up. Previews therefore show it on
+     * both sides.
+     */
+    protected fun readClockState(preferences: SharedPreferences): ClockOverlayState {
+        val clock = ClockPreferences.read(
+            preferences = preferences,
+            effectId = effectId,
+            singleImageMode = isClockSingleImageMode(),
+            lockedProgress = lockedProgress,
+            unlockedProgress = unlockedProgress
+        )
+        return if (configuringPreviewEngine) {
+            clock.copy(screenId = ClockScreen.BOTH.id)
+        } else {
+            clock
+        }
+    }
+
+    /**
+     * Whether the clock may show: it is single-image only (a position
+     * calibrated against one photo is wrong for the next). Read defensively,
+     * like SubjectIsolationBackendPolicy — the clock is decoration, and a
+     * failure deciding the playlist mode must not abort configuring the
+     * effect itself.
+     */
+    protected fun isClockSingleImageMode(): Boolean = runCatching {
+        !PlaylistModeManager.isPlaylistMode(applicationContext)
+    }.getOrDefault(true)
 
     final override fun onCreateEngine(): Engine {
         return EffectEngine().also(activeEngines::add)
@@ -99,6 +155,8 @@ abstract class AnimatedEffectWallpaperService<R : Any> : GLWallpaperService() {
             isKeyguardLocked = ::isKeyguardLocked,
             onUnlock = ::playUnlockAnimation,
             onPrepareForLock = ::prepareForNextUnlock,
+            onShowLocked = ::showLockedState,
+            onResumeHome = ::snapToHomeState,
             onScreenOff = {
                 if (!isPreview) {
                     rotateWallpaper()
@@ -164,6 +222,7 @@ abstract class AnimatedEffectWallpaperService<R : Any> : GLWallpaperService() {
         }
 
         override fun onVisibilityChanged(visible: Boolean) {
+            onEngineVisibilityChanged(renderer, visible)
             if (!behavior.transitionsEnabled) {
                 animator?.cancel()
                 animator = null
@@ -183,7 +242,9 @@ abstract class AnimatedEffectWallpaperService<R : Any> : GLWallpaperService() {
 
             if (!visible) {
                 if (isDeviceInteractive()) {
-                    if (blurDrawerWhenHidden) {
+                    // Skip the drawer blur while an unlock settles: some skins
+                    // briefly hide the wallpaper during fingerprint unlock.
+                    if (blurDrawerWhenHidden && !events.isSettlingAfterUnlock()) {
                         renderer?.let { setDrawerBlurred(it, true) }
                     }
                 } else {
@@ -199,15 +260,7 @@ abstract class AnimatedEffectWallpaperService<R : Any> : GLWallpaperService() {
                 renderer?.let { setDrawerBlurred(it, false) }
             }
 
-            val locked = isKeyguardLocked()
-            events.setLocked(locked)
-            if (locked) {
-                animator?.cancel()
-                renderer?.let { setEffectProgress(it, lockedProgress) }
-                requestRender()
-            } else {
-                snapToHomeState()
-            }
+            events.onVisible(keyguardLocked = isKeyguardLocked())
         }
 
         override fun onWallpaperFlagsChanged(which: Int) {
@@ -291,7 +344,13 @@ abstract class AnimatedEffectWallpaperService<R : Any> : GLWallpaperService() {
                 this@AnimatedEffectWallpaperService
             )
             val preferences = getSharedPreferences(PREFERENCES_NAME, MODE_PRIVATE)
-            configureRenderer(currentRenderer, preferences)
+            // Read back by readClockState() during this call — see the field.
+            configuringPreviewEngine = isPreview
+            try {
+                configureRenderer(currentRenderer, preferences)
+            } finally {
+                configuringPreviewEngine = false
+            }
         }
 
         private fun reconcileBehavior(
@@ -349,7 +408,19 @@ abstract class AnimatedEffectWallpaperService<R : Any> : GLWallpaperService() {
             }
         }
 
+        private fun showLockedState() {
+            animator?.cancel()
+            animator = null
+            renderer?.let { setEffectProgress(it, lockedProgress) }
+            requestRender()
+        }
+
         private fun snapToHomeState() {
+            // Let an in-progress unlock animation finish rather than jumping.
+            if (behavior.transitionsEnabled && animator?.isRunning == true) {
+                requestRender()
+                return
+            }
             animator?.cancel()
             animator = null
             renderer?.let { currentRenderer ->

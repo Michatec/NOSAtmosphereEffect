@@ -41,6 +41,23 @@ abstract class GlassWallpaperService protected constructor(
             transitionStyle = settings.transitionStyle,
             backgroundOnly = settings.backgroundOnly
         )
+        // Playlist and theme modes rotate the image underneath the clock, so
+        // the clock stays off there — a position calibrated against one photo
+        // is wrong for the next. See AtmosphereClockPolicy.resolveEnabled.
+        renderer.configureClock(
+            readClockState(preferences)
+        )
+    }
+
+    /**
+     * The clock's frame cadence is owned by the controller's ClockFramePump,
+     * one per engine — see the same override on the other effect services.
+     */
+    final override fun onEngineVisibilityChanged(
+        renderer: GlassRenderController?,
+        visible: Boolean
+    ) {
+        renderer?.setEngineVisible(visible)
     }
 
     final override fun setEffectProgress(

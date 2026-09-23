@@ -82,7 +82,6 @@ object WallpaperFitHelper {
     const val ACTIVE_SOURCE_FILE = "wallpaper_src.jpg"
     const val NEXT_SOURCE_FILE = "next_wallpaper_src.jpg"
 
-    private const val MAX_DECODE_DIM = 4096
 
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -201,6 +200,69 @@ object WallpaperFitHelper {
                 )
             }
         }
+        if (surfaceW > 0 && surfaceH > 0) {
+            // A posture change (fold / unfold) usually finds the image for the
+            // new surface size already prepared, which turns the re-fit into a
+            // plain texture upload instead of a decode the compositor has to
+            // paper over by stretching the previous frame.
+            val prepared = WallpaperPostureCache.take(renderKey(context, surfaceW, surfaceH))
+            if (prepared != null) return prepared
+        }
+        return buildRenderImage(context, surfaceW, surfaceH)
+    }
+
+    /**
+     * Prepares — off the render thread — the image [loadForRender] would build
+     * for [surfaceW] x [surfaceH], and parks it for the next call that asks for
+     * exactly that. Used to get the other fold posture ready before the device
+     * is actually folded into it. A no-op when it is already prepared.
+     *
+     * Runs on a background thread by contract: it decodes and rasterizes.
+     */
+    fun prewarm(context: Context, surfaceW: Int, surfaceH: Int) {
+        if (surfaceW <= 0 || surfaceH <= 0) return
+        val key = renderKey(context, surfaceW, surfaceH)
+        if (WallpaperPostureCache.holds(key)) return
+        WallpaperPostureCache.store(key, buildRenderImage(context, surfaceW, surfaceH))
+    }
+
+    /**
+     * Identifies the image [loadForRender] would produce: the surface size, the
+     * display settings that shape the fit, and a stamp of the wallpaper files
+     * themselves so a changed wallpaper never matches a prepared one.
+     */
+    /**
+     * Builds the image [loadForRender] would, without touching the posture
+     * cache — for analysis (the adaptive clock's subject profile), which must
+     * neither consume an image a renderer prepared nor park one of its own.
+     */
+    internal fun buildForAnalysis(context: Context, surfaceW: Int, surfaceH: Int): RenderImage =
+        buildRenderImage(context, surfaceW, surfaceH)
+
+    internal fun renderKey(context: Context, surfaceW: Int, surfaceH: Int): WallpaperPostureCache.Key =
+        WallpaperPostureCache.Key(
+            width = surfaceW,
+            height = surfaceH,
+            mode = getActiveFitMode(context),
+            fill = getActiveFillMode(context),
+            scroll = isScrollEnabled(context),
+            stamp = wallpaperStamp(context)
+        )
+
+    private fun wallpaperStamp(context: Context): String {
+        val filesDir = context.filesDir
+        return fileStamp(File(filesDir, ACTIVE_WALLPAPER_FILE)) +
+            "|" + fileStamp(File(filesDir, ACTIVE_SOURCE_FILE))
+    }
+
+    private fun fileStamp(file: File): String =
+        if (file.isFile) "${file.lastModified()}:${file.length()}" else "-"
+
+    private fun buildRenderImage(
+        context: Context,
+        surfaceW: Int,
+        surfaceH: Int
+    ): RenderImage {
         if (!isScrollEnabled(context) || surfaceW <= 0 || surfaceH <= 0) {
             return RenderImage(loadDisplayBitmap(context, surfaceW, surfaceH), 1.0f)
         }
@@ -211,7 +273,9 @@ object WallpaperFitHelper {
         val filesDir = context.filesDir
         var source: Bitmap? = null
         val srcFile = File(filesDir, ACTIVE_SOURCE_FILE)
-        if (srcFile.exists()) source = decodeFileSampled(srcFile, MAX_DECODE_DIM)
+        if (srcFile.exists()) {
+            source = decodeFileSampled(srcFile, ImageMemoryBudget.budgetBytes(context))
+        }
         if (source == null) {
             val file = File(filesDir, ACTIVE_WALLPAPER_FILE)
             if (file.exists()) source = BitmapFactory.decodeFile(file.absolutePath)
@@ -299,7 +363,7 @@ object WallpaperFitHelper {
         if (needsSourceImage(mode)) {
             val srcFile = File(filesDir, ACTIVE_SOURCE_FILE)
             if (srcFile.exists()) {
-                source = decodeFileSampled(srcFile, MAX_DECODE_DIM)
+                source = decodeFileSampled(srcFile, ImageMemoryBudget.budgetBytes(context))
             }
         }
 
@@ -501,7 +565,7 @@ object WallpaperFitHelper {
         if (isScrollEnabled(context) || needsSourceImage(getNextFitMode(context))) {
             val srcFile = File(filesDir, NEXT_SOURCE_FILE)
             if (srcFile.exists()) {
-                val bitmap = decodeFileSampled(srcFile, MAX_DECODE_DIM)
+                val bitmap = decodeFileSampled(srcFile, ImageMemoryBudget.budgetBytes(context))
                 if (bitmap != null) return bitmap
             }
         }
@@ -511,18 +575,33 @@ object WallpaperFitHelper {
     }
 
     /**
-     * Memory-safe decode of a file: downsamples to [maxDim] and applies EXIF
+     * Decodes a wallpaper source file at its native resolution, sampling only
+     * when the decoded bitmap would exceed [budgetBytes], and applies EXIF
      * rotation. Playlist originals are raw copies of the picked images, so
      * they can be huge and carry EXIF orientation.
+     *
+     * This used to downsample every source to a 4096px longest side, which
+     * threw away most of the pixels of an ordinary phone photo before the fit
+     * pass had a chance to resample it to the surface. The fit pass is a
+     * single high-quality reduction with FILTER_BITMAP; feeding it the full
+     * image is what makes that reduction worth having, and feeding it a
+     * pre-halved one is a reduction applied twice.
      */
-    fun decodeFileSampled(file: File, maxDim: Int = MAX_DECODE_DIM): Bitmap? {
+    fun decodeFileSampled(
+        file: File,
+        budgetBytes: Long = ImageMemoryBudget.DEFAULT_BUDGET_BYTES
+    ): Bitmap? {
         return try {
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeFile(file.absolutePath, bounds)
             if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
 
             val options = BitmapFactory.Options().apply {
-                inSampleSize = calculateInSampleSize(bounds, maxDim)
+                inSampleSize = ImageMemoryBudget.sampleSizeForBudget(
+                    bounds.outWidth,
+                    bounds.outHeight,
+                    budgetBytes
+                )
                 inPreferredConfig = Bitmap.Config.ARGB_8888
             }
             val raw = BitmapFactory.decodeFile(file.absolutePath, options) ?: return null
@@ -537,10 +616,6 @@ object WallpaperFitHelper {
             Log.w(TAG, "Invalid wallpaper image at ${file.absolutePath}", error)
             null
         }
-    }
-
-    private fun calculateInSampleSize(options: BitmapFactory.Options, maxDim: Int): Int {
-        return ImageSampling.sampleSize(options.outWidth, options.outHeight, maxDim)
     }
 
     private fun applyExifRotation(file: File, bitmap: Bitmap): Bitmap {

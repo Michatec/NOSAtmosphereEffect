@@ -20,8 +20,9 @@ android {
 
     defaultConfig {
         applicationId = "com.saad_khan_rind.atmosphere_effect"
-        versionName = "7.1.8"
-        versionCode = 500718
+        versionName = "7.2.3"
+        versionCode = 500723
+        buildConfigField("boolean", "FOLDER_PLAYLISTS", "false")
     }
 
     signingConfigs {
@@ -47,21 +48,21 @@ android {
             dimension = "apiLevel"
             minSdk = 36
             targetSdk = 36
-            versionCode = 500718
+            versionCode = 500723
         }
 
         create("v35") {
             dimension = "apiLevel"
             minSdk = 35
             targetSdk = 36
-            versionCode = 400718
+            versionCode = 400723
         }
 
         create("v33") {
             dimension = "apiLevel"
             minSdk = 33
             targetSdk = 33
-            versionCode = 300718
+            versionCode = 300723
         }
 
         create("play") {
@@ -71,10 +72,28 @@ android {
         create("fdroid") {
             dimension = "distribution"
         }
+
+        // Play-services build plus folder playlists. Declares the photo
+        // permissions (READ_MEDIA_IMAGES) that the Play Store build must not,
+        // so it ships separately. Sits in the existing dimension so current
+        // task names (assembleV36PlayRelease, ...) are unchanged.
+        create("folder") {
+            dimension = "distribution"
+            buildConfigField("boolean", "FOLDER_PLAYLISTS", "true")
+        }
+    }
+
+    sourceSets {
+        // The folder flavor reuses the Play build's ML Kit subject model code.
+        getByName("folder") {
+            java.directories.add("src/play/java")
+            kotlin.directories.add("src/play/java")
+        }
     }
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     androidResources {
@@ -123,6 +142,9 @@ dependencies {
 
     "playImplementation"("com.google.android.gms:play-services-base:18.10.0")
     "playImplementation"("com.google.android.gms:play-services-mlkit-subject-segmentation:16.0.0-beta1")
+
+    "folderImplementation"("com.google.android.gms:play-services-base:18.10.0")
+    "folderImplementation"("com.google.android.gms:play-services-mlkit-subject-segmentation:16.0.0-beta1")
 
     "fdroidImplementation"(libs.litert.api)
     "fdroidImplementation"(libs.litert.fdroid)

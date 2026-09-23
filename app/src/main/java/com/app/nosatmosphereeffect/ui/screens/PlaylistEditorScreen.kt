@@ -1,6 +1,17 @@
 package com.app.nosatmosphereeffect.ui.screens
 
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.CreateNewFolder
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.InputChip
+import androidx.compose.material3.InputChipDefaults
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.TextButton
 import android.content.Context
@@ -104,7 +115,11 @@ fun PlaylistEditorScreen(
     onDefaultFitModeChanged: (String, String) -> Unit,
     showCropOptions: Boolean,
     onShowCropOptions: () -> Unit,
-    onDismissCropOptions: () -> Unit
+    onDismissCropOptions: () -> Unit,
+    onRename: (() -> Unit)? = null,
+    watchedFolders: List<String> = emptyList(),
+    onAddFolder: (() -> Unit)? = null,
+    onRemoveFolder: (Int) -> Unit = {}
 ) {
     val pagerState = rememberPagerState(pageCount = { entries.size })
 
@@ -119,6 +134,13 @@ fun PlaylistEditorScreen(
                 backIcon = painterResource(R.drawable.ic_arrow_back),
                 onBack = onBack,
                 actions = {
+                    if (onRename != null) {
+                        AtmoAnimatedIconButton(
+                            imageVector = Icons.Rounded.Edit,
+                            contentDescription = "Rename playlist",
+                            onClick = onRename
+                        )
+                    }
                     Box {
                         AtmoAnimatedIconButton(
                             painter = painterResource(id = R.drawable.ic_crop),
@@ -241,6 +263,13 @@ fun PlaylistEditorScreen(
                         .padding(horizontal = 20.dp, vertical = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    if (onAddFolder != null || watchedFolders.isNotEmpty()) {
+                        WatchedFoldersRow(
+                            folders = watchedFolders,
+                            onAddFolder = onAddFolder,
+                            onRemoveFolder = onRemoveFolder
+                        )
+                    }
                     if (showAtmosphereGlassOption) {
                         SettingSwitchRow(
                             title = "Add glass effect",
@@ -268,6 +297,64 @@ fun PlaylistEditorScreen(
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WatchedFoldersRow(
+    folders: List<String>,
+    onAddFolder: (() -> Unit)?,
+    onRemoveFolder: (Int) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            if (folders.isEmpty()) {
+                "Follow a folder to add its new images automatically"
+            } else {
+                "New images in these folders are added when you open the app"
+            },
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            folders.forEachIndexed { index, name ->
+                InputChip(
+                    selected = true,
+                    onClick = { onRemoveFolder(index) },
+                    label = { Text(name) },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Rounded.Folder,
+                            contentDescription = null,
+                            modifier = Modifier.size(InputChipDefaults.IconSize)
+                        )
+                    },
+                    trailingIcon = {
+                        Icon(
+                            Icons.Rounded.Close,
+                            contentDescription = "Stop following $name",
+                            modifier = Modifier.size(InputChipDefaults.IconSize)
+                        )
+                    }
+                )
+            }
+            if (onAddFolder != null) {
+                AssistChip(
+                    onClick = onAddFolder,
+                    label = { Text(if (folders.isEmpty()) "Follow folder" else "Folders") },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Rounded.CreateNewFolder,
+                            contentDescription = null,
+                            modifier = Modifier.size(AssistChipDefaults.IconSize)
+                        )
+                    }
+                )
             }
         }
     }

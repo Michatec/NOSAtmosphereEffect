@@ -49,6 +49,24 @@ class BlurToSharpService :
             noiseScale = preferences.readFloat("noise_scale", 2_000f),
             noiseStrength = preferences.readFloat("noise_strength", 0.06f)
         )
+        // Reverse Atmosphere shares every clock preference with the rest of
+        // the app; only the transition endpoints differ, and those come from
+        // this service's own lockedProgress/unlockedProgress. The controller
+        // still takes the flat arguments its forward twin uses, so the shared
+        // state object is unpacked here rather than passed through.
+        val clock = readClockState(preferences)
+        renderer.configureClock(clock)
+    }
+
+    /**
+     * The clock's frame cadence is owned by the controller's ClockFramePump,
+     * one per engine — see the same override on AtmosphereService.
+     */
+    override fun onEngineVisibilityChanged(
+        renderer: AtmosphereRenderController?,
+        visible: Boolean
+    ) {
+        renderer?.setEngineVisible(visible)
     }
 
     override fun setEffectProgress(

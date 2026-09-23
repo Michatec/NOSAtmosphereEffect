@@ -68,6 +68,17 @@ Canvas Sketch, Glass Effect, Atmosphere with Glass, and Halftone Print share the
 
 If Canvas Sketch cannot find a confident foreground subject, it falls back to sketching the complete wallpaper. A background-only effect waits for a usable mask instead of applying across an unprotected subject. Wallpaper image contents and generated masks never leave the device. Atmo Engine does not request the `INTERNET` or `ACCESS_NETWORK_STATE` permission. In the Google Play build, Google Play services may use its own network access only when the user requests the optional model download.
 
+#### Wallpaper Clock
+
+Every effect can draw a clock into the wallpaper itself (Advanced Settings → Clock; single-image mode only). **Choose style, position & size** opens a live preview of the clock on your wallpaper. A box is drawn around it: drag inside the box to move the clock, drag a corner to change both dimensions or an edge to change one, and a centre guide lights up when it is exactly centred. There are no size sliders — the box is the size. The clock is also always shown in the wallpaper picker's preview, whichever screen it is set to appear on.
+
+Two faces, both made of glass: the wallpaper shows through the digits, bent at their rounded edges, softly frosted inside and lit along the top.
+
+* **Glass:** hours and minutes side by side.
+* **Glass Stacked:** hours above minutes, which goes much larger on a phone.
+
+* **Depth effect:** Draws the photo's subject back over the clock, so the clock sits behind them, using the same on-device subject model as subject isolation (see above).
+
 ### 2\. Select Image & Playlist Mode
 After selecting an effect, you will be prompted to choose your wallpaper mode:
 
@@ -78,6 +89,10 @@ After selecting an effect, you will be prompted to choose your wallpaper mode:
 * **Theme Playlists:** Build separate Light and Dark playlists with one or more wallpapers in each. Atmo switches to the matching collection when the system theme changes, then rotates within that collection using your selected interval.
 
 * **Edit Existing Playlist:** If you already have a standard or theme-based playlist running, this option loads your saved wallpapers (including their exact zoom and crop settings). You can remove images, add new ones, or tweak existing crops without starting over. The playlist editor also allows you to define a default crop setting for newly added images.
+
+* **Saved Playlists:** Every playlist you apply is saved automatically, so switching to a single image or to theme playlists no longer discards it. Open **Saved playlists** to switch back to, rename, or delete any of them. Tap the pencil in the playlist editor to name a playlist.
+
+* **Playlist from Folder (folder build only):** Pick one or more device folders; their images become the playlist, and the playlist stays in sync with them: images you add are added and images you delete are removed, whenever the screen turns off and whenever you open Atmo Engine. If the image on screen is deleted, it is replaced at the next screen-off. A folder playlist is never emptied by a sync, so it keeps its images if its folders become unreadable (for example, an unmounted SD card). This needs photo access (`READ_MEDIA_IMAGES`), so it ships as a separate `folder` build flavor (`assembleV36FolderRelease`, `assembleV33FolderRelease`, …) instead of the Play Store and F-Droid builds. The app asks for access each time you set up a folder playlist. With Android 14+ **Select photos** access only the chosen images are visible, so new images can't be detected; choose **Allow all** to follow folders.
 
 ### 3\. Application & Activation
 
@@ -188,19 +203,21 @@ This project is built using Kotlin, C++17, the Android NDK, and Gradle. The proj
 
 Atmo Engine keeps one shared codebase and combines two flavor dimensions:
 
-All artifacts in the table below use version name **7.1.1**.
+All artifacts in the table below use version name **7.2.3**.
 
 | Flavor | Minimum Android | Target SDK | Version code | Intended release |
 | --- | ---: |-----------:|-------------:| --- |
-| `v33Play` | Android 13 / API 33 |     API 33 |     `300711` | ML Kit APK |
-| `v33Fdroid` | Android 13 / API 33 |     API 33 |     `300711` | FOSS APK for F-Droid |
-| `v35Play` | Android 15 / API 35 |     API 36 |     `400711` | Google Play ML Kit AAB |
-| `v36Play` | Android 16 / API 36 |     API 36 |     `500711` | ML Kit APK |
-| `v36Fdroid` | Android 16 / API 36 |     API 36 |     `500711` | FOSS APK |
+| `v33Play` | Android 13 / API 33 |     API 33 |     `300723` | ML Kit APK |
+| `v33Fdroid` | Android 13 / API 33 |     API 33 |     `300723` | FOSS APK for F-Droid |
+| `v33Folder` | Android 13 / API 33 |     API 33 |     `300723` | ML Kit APK with folder playlists |
+| `v35Play` | Android 15 / API 35 |     API 36 |     `400723` | Google Play ML Kit AAB |
+| `v36Play` | Android 16 / API 36 |     API 36 |     `500723` | ML Kit APK |
+| `v36Fdroid` | Android 16 / API 36 |     API 36 |     `500723` | FOSS APK |
+| `v36Folder` | Android 16 / API 36 |     API 36 |     `500723` | ML Kit APK with folder playlists |
 
-The `play` source set contains only the ML Kit implementation and explicit model-download controller. The `fdroid` source set contains only [U2NetP](https://github.com/xuebinqin/U-2-Net), its model files, and the source-built FOSS LiteRT runtime. UI, effects, playlists, palette behavior, and settings remain shared in `main`. Model and runtime provenance is recorded in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+The `play` source set contains only the ML Kit implementation and explicit model-download controller. The `fdroid` source set contains only [U2NetP](https://github.com/xuebinqin/U-2-Net), its model files, and the source-built FOSS LiteRT runtime. UI, effects, playlists, palette behavior, and settings remain shared in `main`. The `folder` flavor reuses the `play` source set and additionally declares `READ_MEDIA_IMAGES` and `READ_MEDIA_VISUAL_USER_SELECTED` for folder playlists; the Play Store and F-Droid builds do not request photo access. Model and runtime provenance is recorded in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-Stable and beta release workflows produce exactly five artifacts: Android 16+ ML Kit and FOSS APKs, Android 13+ ML Kit and FOSS APKs, and an Android 15+ ML Kit AAB for Google Play. CI installs the pinned NDK and inspects every archive before signing: the Vulkan library for all four ABIs and every effect's SPIR-V pair must be present, ML Kit artifacts must not contain the [U2NetP model](https://github.com/xuebinqin/U-2-Net) or LiteRT native runtime, both FOSS APKs must contain them, and each ML Kit APK must remain smaller than its matching FOSS APK and below 10 MiB.
+Stable and beta release workflows produce exactly seven artifacts: Android 16+ ML Kit, FOSS, and folder-playlist APKs, Android 13+ ML Kit, FOSS, and folder-playlist APKs, and an Android 15+ ML Kit AAB for Google Play. Only the folder-playlist APKs may declare `READ_MEDIA_IMAGES`; CI fails if any other artifact does. CI installs the pinned NDK and inspects every archive before signing: the Vulkan library for all four ABIs and every effect's SPIR-V pair must be present, ML Kit artifacts must not contain the [U2NetP model](https://github.com/xuebinqin/U-2-Net) or LiteRT native runtime, both FOSS APKs must contain them, and each ML Kit APK must remain smaller than its matching FOSS APK and below 10 MiB.
 
 1.  Clone the repository.
 2.  Open in the latest stable Android Studio.
@@ -213,6 +230,8 @@ Stable and beta release workflows produce exactly five artifacts: Android 16+ ML
 ./gradlew bundleV35PlayRelease
 ./gradlew assembleV36PlayRelease
 ./gradlew assembleV36FdroidRelease
+./gradlew assembleV33FolderRelease
+./gradlew assembleV36FolderRelease
 ```
 
 Release signing keys are intentionally not stored in the repository. Configure your Play upload key locally before uploading either AAB; F-Droid builds and signs its own APK.

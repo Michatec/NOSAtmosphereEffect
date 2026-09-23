@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -21,16 +22,22 @@ import com.app.nosatmosphereeffect.activity.AdvancedSettingsActivity
 import com.app.nosatmosphereeffect.activity.BlurToSharpCropActivity
 import com.app.nosatmosphereeffect.activity.CropActivity
 import com.app.nosatmosphereeffect.activity.EffectSelectionActivity
+import com.app.nosatmosphereeffect.activity.FolderPickerActivity
 import com.app.nosatmosphereeffect.activity.PaletteDiagnosticsActivity
 import com.app.nosatmosphereeffect.activity.PlaylistEditorActivity
+import com.app.nosatmosphereeffect.activity.SavedPlaylistsActivity
 import com.app.nosatmosphereeffect.activity.ThemePlaylistEditorActivity
 import com.app.nosatmosphereeffect.activity.WallpaperEffectServices
+import com.app.nosatmosphereeffect.helper.FolderPlaylistSource
 import com.app.nosatmosphereeffect.helper.PlaylistModeManager
 import com.app.nosatmosphereeffect.helper.SystemColorSyncPreferences
 import com.app.nosatmosphereeffect.helper.WallpaperBehaviorPreferences
 import com.app.nosatmosphereeffect.helper.WallpaperBehaviorSettings
 import com.app.nosatmosphereeffect.image.BitmapDecoder
 import com.app.nosatmosphereeffect.renderer.status.RendererRuntimeStatus
+import com.app.nosatmosphereeffect.storage.ActiveFolderWatch
+import com.app.nosatmosphereeffect.storage.SavedPlaylistLibrary
+import com.app.nosatmosphereeffect.storage.WallpaperStorageCoordinator
 import com.app.nosatmosphereeffect.renderer.status.RendererRuntimeStatusListener
 import com.app.nosatmosphereeffect.renderer.status.RendererRuntimeStatusRepository
 import com.app.nosatmosphereeffect.ui.model.EffectCatalog
@@ -63,6 +70,7 @@ class MainActivity : ComponentActivity() {
     private var rendererStatusUi by mutableStateOf<RendererStatusUiModel?>(null)
     private var skipNextResumeStatusRefresh = false
     private var titleTapCount = 0
+    private var folderAccessRequested = false
     private var lastTitleTapTime = 0L
 
     private val rendererStatusListener = RendererRuntimeStatusListener { status ->
@@ -81,6 +89,11 @@ class MainActivity : ComponentActivity() {
     private val pickMultipleImages =
         registerForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris: List<Uri> ->
             if (uris.isNotEmpty()) launchMultiCropActivity(ArrayList(uris))
+        }
+
+    private val requestFolderAccess =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+            if (FolderPlaylistSource.hasFullAccess(this)) syncPlaylistLibrary()
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -132,6 +145,20 @@ class MainActivity : ComponentActivity() {
                     onPickMultipleImages = { pickMultipleImages.launch("image/*") },
                     onPickThemePlaylists = { launchThemePlaylistEditor(editExisting = false) },
                     onEditExistingPlaylist = { launchEditExistingPlaylist() },
+                    onOpenSavedPlaylists = {
+                        startActivity(
+                            SavedPlaylistsActivity.intent(this, getActiveEffectType() ?: "ORIGINAL")
+                        )
+                    },
+                    onPickFolderPlaylist = if (FolderPlaylistSource.isAvailable) {
+                        {
+                            startActivity(
+                                FolderPickerActivity.intent(this, getActiveEffectType() ?: "ORIGINAL")
+                            )
+                        }
+                    } else {
+                        null
+                    },
                     onAdvancedSettings = { openAdvancedSettings() },
                     onTitleTap = { handleTitleTap() }
                 )
@@ -149,6 +176,51 @@ class MainActivity : ComponentActivity() {
             skipNextResumeStatusRefresh = false
         } else {
             checkWallpaperStatus()
+        }
+        syncPlaylistLibrary()
+    }
+
+    /**
+     * Keeps the saved-playlist library current: adopts a playlist applied
+     * before the library existed, and (folder build) mirrors the active
+     * playlist's watched folders, adding new images and dropping deleted ones.
+     */
+    private fun syncPlaylistLibrary() {
+        if (FolderPlaylistSource.isAvailable && !folderAccessRequested &&
+            !FolderPlaylistSource.hasFullAccess(this) &&
+            !ActiveFolderWatch.read(this).isEmpty
+        ) {
+            // Once per launch: without full photo access new images stay invisible.
+            folderAccessRequested = true
+            requestFolderAccess.launch(FolderPlaylistSource.requestedPermissions(this))
+        }
+        ioExecutor.execute {
+            try {
+                WallpaperStorageCoordinator.runExclusive {
+                    if (PlaylistModeManager.getMode(this) == PlaylistModeManager.MODE_STANDARD &&
+                        SavedPlaylistLibrary.activeId(this) == null
+                    ) {
+                        SavedPlaylistLibrary.preserveActive(this)
+                    }
+                }
+                val result = FolderPlaylistSource.syncActivePlaylist(this)
+                if (result.changed) {
+                    val message = listOfNotNull(
+                        result.added.takeIf { it > 0 }?.let {
+                            if (it == 1) "added 1 new image" else "added $it new images"
+                        },
+                        result.removed.takeIf { it > 0 }?.let {
+                            if (it == 1) "removed 1 deleted image" else "removed $it deleted images"
+                        }
+                    ).joinToString(" and ").replaceFirstChar(Char::uppercase)
+                    runOnUiThread {
+                        if (isDestroyed) return@runOnUiThread
+                        Toast.makeText(this, "Folders synced: $message", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (error: Exception) {
+                Log.w(TAG, "Could not sync the playlist library", error)
+            }
         }
     }
 

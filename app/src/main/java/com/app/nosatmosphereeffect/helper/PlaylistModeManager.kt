@@ -2,7 +2,9 @@ package com.app.nosatmosphereeffect.helper
 
 import android.content.Context
 import android.content.res.Configuration
+import com.app.nosatmosphereeffect.storage.ActiveFolderWatch
 import com.app.nosatmosphereeffect.storage.FileTransactions
+import com.app.nosatmosphereeffect.storage.SavedPlaylistLibrary
 import java.io.File
 
 /** Owns the on-disk collections and mode flag shared by every wallpaper effect. */
@@ -79,9 +81,17 @@ object PlaylistModeManager {
     fun lightPlaylistDir(context: Context) = File(context.filesDir, LIGHT_PLAYLIST_DIR)
     fun darkPlaylistDir(context: Context) = File(context.filesDir, DARK_PLAYLIST_DIR)
 
+    /**
+     * Removes the active standard playlist. It is first copied into the saved
+     * playlist library, so switching to a single image or theme playlists can
+     * always be undone from "Saved playlists".
+     */
     fun clearStandardCollections(context: Context) {
+        SavedPlaylistLibrary.preserveActive(context)
         FileTransactions.deleteRecursively(standardPlaylistDir(context))
         FileTransactions.deleteRecursively(File(context.filesDir, STANDARD_ORIGINALS_DIR))
+        SavedPlaylistLibrary.setActiveId(context, null)
+        ActiveFolderWatch.clear(context)
     }
 
     fun clearThemeCollections(context: Context) {

@@ -11,6 +11,7 @@ import androidx.lifecycle.ViewModel
 import com.app.nosatmosphereeffect.helper.MatrixStatePolicy
 import com.app.nosatmosphereeffect.helper.WallpaperFitHelper
 import com.app.nosatmosphereeffect.storage.FileTransactions
+import com.app.nosatmosphereeffect.storage.WatchedFolder
 import java.io.File
 
 internal data class PlaylistDraftItem(
@@ -19,12 +20,20 @@ internal data class PlaylistDraftItem(
     val editedFilePath: String? = null,
     val matrixState: FloatArray? = null,
     val fitMode: String = WallpaperFitHelper.MODE_FILL,
-    val fillMode: String = WallpaperFitHelper.FILL_BLACK
+    val fillMode: String = WallpaperFitHelper.FILL_BLACK,
+    /** MediaStore id when the image came from a followed folder. */
+    val mediaId: Long? = null
 )
 
 internal class StandardPlaylistDraftState : ViewModel() {
     val items = mutableStateListOf<PlaylistDraftItem>()
     var initialized = false
+    /** Library entry this draft updates when applied; null creates a new one. */
+    var savedPlaylistId by mutableStateOf<String?>(null)
+    var playlistName by mutableStateOf<String?>(null)
+    val watchedFolders = mutableStateListOf<WatchedFolder>()
+    /** MediaStore ids already offered from [watchedFolders]; never re-added. */
+    var knownMediaIds: Set<Long> = emptySet()
     var atmosphereGlassEnabled by mutableStateOf(false)
     var isProcessing by mutableStateOf(false)
     var applyCompleted by mutableStateOf(false)
@@ -56,6 +65,7 @@ internal object PlaylistDraftStateCodec {
                     putFloatArray(KEY_MATRIX, MatrixStatePolicy.copyIfValid(item.matrixState))
                     putString(KEY_FIT_MODE, item.fitMode)
                     putString(KEY_FILL_MODE, item.fillMode)
+                    item.mediaId?.let { putLong(KEY_MEDIA_ID, it) }
                 }
             }
         )
@@ -75,7 +85,8 @@ internal object PlaylistDraftStateCodec {
                 fitMode = state.getString(KEY_FIT_MODE)
                     ?: WallpaperFitHelper.MODE_FILL,
                 fillMode = state.getString(KEY_FILL_MODE)
-                    ?: WallpaperFitHelper.FILL_BLACK
+                    ?: WallpaperFitHelper.FILL_BLACK,
+                mediaId = if (state.containsKey(KEY_MEDIA_ID)) state.getLong(KEY_MEDIA_ID) else null
             )
         }
     }
@@ -86,6 +97,7 @@ internal object PlaylistDraftStateCodec {
     private const val KEY_MATRIX = "matrix"
     private const val KEY_FIT_MODE = "fit_mode"
     private const val KEY_FILL_MODE = "fill_mode"
+    private const val KEY_MEDIA_ID = "media_id"
 }
 
 internal object PlaylistDraftCache {

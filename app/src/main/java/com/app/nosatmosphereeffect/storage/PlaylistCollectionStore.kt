@@ -10,6 +10,8 @@ import android.util.Log
 import com.app.nosatmosphereeffect.helper.ImageFitMode
 import com.app.nosatmosphereeffect.helper.ImageFitPolicy
 import com.app.nosatmosphereeffect.helper.MatrixStatePolicy
+import com.app.nosatmosphereeffect.helper.PlaylistFilePolicy
+import com.app.nosatmosphereeffect.helper.PlaylistModeManager
 import com.app.nosatmosphereeffect.helper.WallpaperFitHelper
 import com.app.nosatmosphereeffect.image.BitmapDecoder
 import com.app.nosatmosphereeffect.image.BitmapStore
@@ -26,12 +28,15 @@ internal data class PlaylistImageSource(
     val editedFilePath: String?,
     val matrixState: FloatArray?,
     val fitMode: String,
-    val fillMode: String
+    val fillMode: String,
+    /** MediaStore id when the image came from a followed folder. */
+    val mediaId: Long? = null
 )
 
 internal object PlaylistCollectionStore {
     private const val TAG = "PlaylistCollectionStore"
     private const val STAGED_JPEG_QUALITY = 100
+    const val KEY_MEDIA_ID = "mediaId"
 
     @Throws(IOException::class, SecurityException::class)
     fun stage(
@@ -160,12 +165,154 @@ internal object PlaylistCollectionStore {
         }
     }
 
+    /**
+     * Appends [items] to an existing playlist in place, continuing its
+     * `wallpaper_N.jpg` numbering and `metadata.json`. Returns how many images
+     * were added; an item that cannot be read is skipped, not fatal.
+     * Run inside [WallpaperStorageCoordinator.runExclusive].
+     */
+    @Throws(IOException::class)
+    fun append(
+        context: Context,
+        items: List<PlaylistImageSource>,
+        playlistDirectory: File,
+        originalsDirectory: File,
+        targetWidth: Int,
+        targetHeight: Int
+    ): Int {
+        if (items.isEmpty()) return 0
+        if (targetWidth <= 0 || targetHeight <= 0) {
+            throw IOException("Display dimensions are unavailable")
+        }
+        val existing = PlaylistModeManager.imageFiles(playlistDirectory)
+        if (existing.isEmpty()) throw IOException("There is no playlist to extend")
+
+        val metadataFile = File(playlistDirectory, "metadata.json")
+        val metadata = if (metadataFile.isFile) JSONArray(metadataFile.readText()) else null
+        // metadata[i] describes wallpaper_i, so only append when they line up.
+        val nextIndex = (existing.mapNotNull { PlaylistFilePolicy.index(it.name) }.max() + 1)
+            .let { if (metadata != null && metadata.length() != it) null else it }
+            ?: throw IOException("Playlist metadata does not match its images")
+
+        var index = nextIndex
+        items.forEach { item ->
+            val wallpaper = File(playlistDirectory, "wallpaper_$index.jpg")
+            val original = File(originalsDirectory, "original_$index.jpg")
+            try {
+                UriFiles.copyAtomically(context, item.originalUri, original)
+                val source = BitmapDecoder.decodeUri(
+                    context,
+                    item.originalUri,
+                    targetWidth,
+                    targetHeight
+                )
+                val bitmap = WallpaperFitHelper.fitBitmap(
+                    source,
+                    targetWidth,
+                    targetHeight,
+                    item.fitMode,
+                    item.fillMode
+                )
+                try {
+                    BitmapStore.writeJpegAtomically(bitmap, wallpaper, quality = STAGED_JPEG_QUALITY)
+                } finally {
+                    bitmap.recycle()
+                }
+            } catch (error: Exception) {
+                // One unreadable or deleted image must not block the others.
+                Log.w(TAG, "Skipping ${item.originalUri} while extending the playlist", error)
+                FileTransactions.deleteRecursively(original)
+                FileTransactions.deleteRecursively(wallpaper)
+                return@forEach
+            }
+            metadata?.put(metadataFor(index, item))
+            index++
+        }
+        if (metadata != null && index != nextIndex) {
+            FileTransactions.writeTextAtomically(metadataFile, metadata.toString())
+        }
+        return index - nextIndex
+    }
+
+    /** MediaStore ids recorded for each entry of a playlist, by file index. */
+    fun mediaIds(playlistDirectory: File): Map<Int, Long> {
+        val metadataFile = File(playlistDirectory, "metadata.json")
+        if (!metadataFile.isFile) return emptyMap()
+        val metadata = JSONArray(metadataFile.readText())
+        return (0 until metadata.length()).mapNotNull { index ->
+            val entry = metadata.optJSONObject(index) ?: return@mapNotNull null
+            if (!entry.has(KEY_MEDIA_ID)) return@mapNotNull null
+            index to entry.getLong(KEY_MEDIA_ID)
+        }.toMap()
+    }
+
+    /**
+     * Removes the entries at [removeIndices] and renumbers the rest so
+     * `wallpaper_i` / `original_i` / `metadata[i]` stay contiguous. The new
+     * collection is staged beside the live one and swapped in atomically.
+     * Returns how many entries were removed. Never empties a playlist.
+     * Run inside [WallpaperStorageCoordinator.runExclusive].
+     */
+    @Throws(IOException::class)
+    fun removeEntries(
+        playlistDirectory: File,
+        originalsDirectory: File,
+        removeIndices: Set<Int>
+    ): Int {
+        if (removeIndices.isEmpty()) return 0
+        val metadataFile = File(playlistDirectory, "metadata.json")
+        if (!metadataFile.isFile) return 0
+        val metadata = JSONArray(metadataFile.readText())
+        val kept = (0 until metadata.length()).filter { index ->
+            index !in removeIndices && File(playlistDirectory, "wallpaper_$index.jpg").isFile
+        }
+        if (kept.isEmpty() || kept.size == metadata.length()) return 0
+
+        val token = UUID.randomUUID().toString()
+        val stagedImages = File(playlistDirectory.parentFile, ".playlist-compact-$token.staged")
+        val stagedOriginals = File(originalsDirectory.parentFile, ".originals-compact-$token.staged")
+        try {
+            FileTransactions.prepareEmptyDirectory(stagedImages)
+            FileTransactions.prepareEmptyDirectory(stagedOriginals)
+            val compacted = JSONArray()
+            kept.forEachIndexed { newIndex, oldIndex ->
+                File(playlistDirectory, "wallpaper_$oldIndex.jpg")
+                    .copyTo(File(stagedImages, "wallpaper_$newIndex.jpg"))
+                val original = File(originalsDirectory, "original_$oldIndex.jpg")
+                if (original.isFile) {
+                    original.copyTo(File(stagedOriginals, "original_$newIndex.jpg"))
+                }
+                compacted.put(
+                    JSONObject(metadata.getJSONObject(oldIndex).toString())
+                        .put("original", "original_$newIndex.jpg")
+                )
+            }
+            FileTransactions.writeTextAtomically(
+                File(stagedImages, "metadata.json"),
+                compacted.toString()
+            )
+            FileTransactions.replaceDirectories(
+                listOf(stagedImages to playlistDirectory, stagedOriginals to originalsDirectory)
+            )
+        } finally {
+            listOf(stagedImages, stagedOriginals).forEach { staged ->
+                try {
+                    FileTransactions.deleteRecursively(staged)
+                } catch (error: IOException) {
+                    Log.w(TAG, "Could not remove ${staged.absolutePath}", error)
+                }
+            }
+        }
+        return metadata.length() - kept.size
+    }
+
     private fun metadataFor(index: Int, item: PlaylistImageSource): JSONObject {
         return JSONObject().apply {
             put("original", "original_$index.jpg")
             put("isEdited", item.isEdited)
             put("fitMode", item.fitMode)
             put("fillMode", item.fillMode)
+            item.mediaId?.let { put(KEY_MEDIA_ID, it) }
             MatrixStatePolicy.copyIfValid(item.matrixState)?.let { values ->
                 put("matrix", JSONArray().apply {
                     values.forEach { value -> put(value.toDouble()) }
