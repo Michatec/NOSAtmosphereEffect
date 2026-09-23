@@ -10,7 +10,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Rect
+import com.app.nosatmosphereeffect.helper.ClockBoxRect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.asImageBitmap
@@ -44,7 +44,7 @@ internal fun ClockGlassPreview(
     /** The rendered clock face; its alpha is the glyph shape. */
     face: Bitmap?,
     /** Where the face goes, as fractions of this view. */
-    box: Rect,
+    box: ClockBoxRect,
     opacity: Float,
     /** Changes whenever [face] has been redrawn in place. */
     faceRevision: Int,
@@ -222,7 +222,11 @@ half4 main(float2 coord) {
 
     float3 tint = glyph.rgb / max(glyph.a, 0.001);
     float3 glass = refracted * 1.05 + float3(0.035);
-    glass = mix(glass, glass * tint, 0.16);
+    // Coloured glass: the chosen colour tints what shows through, while the
+    // rim and the specular stay white the way real glass reflects. At the old
+    // 0.16 the colour was barely visible, so picking one looked like it did
+    // nothing at all.
+    glass = mix(glass, glass * tint, 0.55);
     glass = glass + float3(rim * 0.20 + specular * 0.9);
     glass = glass - float3(shade * 0.14);
     float3 result = mix(base, clamp(glass, 0.0, 1.0), body * opacity);

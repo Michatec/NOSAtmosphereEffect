@@ -9,7 +9,6 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -17,26 +16,9 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import com.app.nosatmosphereeffect.helper.ClockBoxHandle
+import com.app.nosatmosphereeffect.helper.ClockBoxRect
 import kotlin.math.abs
-
-/** Which part of the box a drag grabbed. */
-internal enum class ClockBoxHandle {
-    MOVE,
-    TOP_LEFT,
-    TOP_RIGHT,
-    BOTTOM_LEFT,
-    BOTTOM_RIGHT,
-    LEFT,
-    RIGHT,
-    TOP,
-    BOTTOM;
-
-    val resizesWidth: Boolean
-        get() = this != MOVE && this != TOP && this != BOTTOM
-
-    val resizesHeight: Boolean
-        get() = this != MOVE && this != LEFT && this != RIGHT
-}
 
 /**
  * The frame the user drags to place and size the clock.
@@ -52,11 +34,11 @@ internal enum class ClockBoxHandle {
  */
 @Composable
 internal fun ClockBoxOverlay(
-    box: Rect,
+    box: ClockBoxRect,
     /** True when the clock is exactly centred, which lights the centre guide. */
     centered: Boolean,
     showHandles: Boolean,
-    onBoxChange: (Rect, ClockBoxHandle) -> Unit,
+    onBoxChange: (ClockBoxRect, ClockBoxHandle) -> Unit,
     onDragStarted: () -> Unit,
     onDragFinished: () -> Unit,
     onTap: (Offset) -> Unit,
@@ -83,7 +65,7 @@ internal fun ClockBoxOverlay(
             }
             .pointerInput(Unit) {
                 var handle = ClockBoxHandle.MOVE
-                var startBox = Rect.Zero
+                var startBox = ClockBoxRect(0f, 0f, 0f, 0f)
                 var travelled = Offset.Zero
                 detectDragGestures(
                     onDragStart = { position ->
@@ -119,23 +101,23 @@ internal fun ClockBoxOverlay(
 }
 
 /** The proposed rectangle after dragging [handle] by a fraction of the view. */
-private fun Rect.movedBy(handle: ClockBoxHandle, dx: Float, dy: Float): Rect = when (handle) {
-    ClockBoxHandle.MOVE -> translate(dx, dy)
+private fun ClockBoxRect.movedBy(handle: ClockBoxHandle, dx: Float, dy: Float): ClockBoxRect = when (handle) {
+    ClockBoxHandle.MOVE -> ClockBoxRect(left + dx, top + dy, right + dx, bottom + dy)
     // Every resize anchors the opposite side, so the corner under the finger
     // is the one that moves.
-    ClockBoxHandle.TOP_LEFT -> Rect(left + dx, top + dy, right, bottom)
-    ClockBoxHandle.TOP_RIGHT -> Rect(left, top + dy, right + dx, bottom)
-    ClockBoxHandle.BOTTOM_LEFT -> Rect(left + dx, top, right, bottom + dy)
-    ClockBoxHandle.BOTTOM_RIGHT -> Rect(left, top, right + dx, bottom + dy)
-    ClockBoxHandle.LEFT -> Rect(left + dx, top, right, bottom)
-    ClockBoxHandle.RIGHT -> Rect(left, top, right + dx, bottom)
-    ClockBoxHandle.TOP -> Rect(left, top + dy, right, bottom)
-    ClockBoxHandle.BOTTOM -> Rect(left, top, right, bottom + dy)
+    ClockBoxHandle.TOP_LEFT -> ClockBoxRect(left + dx, top + dy, right, bottom)
+    ClockBoxHandle.TOP_RIGHT -> ClockBoxRect(left, top + dy, right + dx, bottom)
+    ClockBoxHandle.BOTTOM_LEFT -> ClockBoxRect(left + dx, top, right, bottom + dy)
+    ClockBoxHandle.BOTTOM_RIGHT -> ClockBoxRect(left, top, right + dx, bottom + dy)
+    ClockBoxHandle.LEFT -> ClockBoxRect(left + dx, top, right, bottom)
+    ClockBoxHandle.RIGHT -> ClockBoxRect(left, top, right + dx, bottom)
+    ClockBoxHandle.TOP -> ClockBoxRect(left, top + dy, right, bottom)
+    ClockBoxHandle.BOTTOM -> ClockBoxRect(left, top, right, bottom + dy)
 }
 
 private fun handleAt(
     position: Offset,
-    box: Rect,
+    box: ClockBoxRect,
     viewWidth: Float,
     viewHeight: Float,
     slop: Float
@@ -165,7 +147,7 @@ private fun handleAt(
     }
 }
 
-private fun DrawScope.drawCentreGuide(box: Rect, centered: Boolean) {
+private fun DrawScope.drawCentreGuide(box: ClockBoxRect, centered: Boolean) {
     val x = size.width / 2f
     val color = if (centered) CENTRE_SNAPPED_COLOR else CENTRE_GUIDE_COLOR
     drawLine(
@@ -185,7 +167,7 @@ private fun DrawScope.drawCentreGuide(box: Rect, centered: Boolean) {
     )
 }
 
-private fun DrawScope.drawBox(box: Rect, showHandles: Boolean, handleRadius: Float) {
+private fun DrawScope.drawBox(box: ClockBoxRect, showHandles: Boolean, handleRadius: Float) {
     val left = box.left * size.width
     val top = box.top * size.height
     val width = box.width * size.width

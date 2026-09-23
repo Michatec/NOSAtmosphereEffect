@@ -87,7 +87,11 @@ vec3 clockGlass(vec3 color, vec2 clockUv, vec4 clockSample, vec2 rectSize, float
 
     vec3 tint = clockSample.rgb / max(clockSample.a, 0.001);
     vec3 glass = refracted * 1.05 + vec3(0.035);
-    glass = mix(glass, glass * tint, 0.16);
+    // Coloured glass: the chosen colour tints what shows through, while the
+    // rim and the specular stay white the way real glass reflects. At the old
+    // 0.16 the colour was barely visible, so picking one looked like it did
+    // nothing at all.
+    glass = mix(glass, glass * tint, 0.55);
     glass += vec3(rim * 0.20 + specular * 0.9);
     glass -= vec3(shade * 0.14);
     return mix(color, clamp(glass, 0.0, 1.0), body * opacity);
