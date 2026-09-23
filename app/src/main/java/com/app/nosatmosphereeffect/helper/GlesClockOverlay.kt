@@ -121,6 +121,7 @@ class GlesClockOverlay(
             appliedState = next
             provider.style = next.style
             provider.showSeconds = next.showSeconds
+            provider.showDate = next.showDate
             provider.animateDigits = next.animate
             provider.animateEntry = next.animate
             provider.color = next.color

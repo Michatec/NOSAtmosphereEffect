@@ -90,6 +90,7 @@ internal class VulkanClockOverlay(
             appliedState = next
             uploader.style = next.style
             uploader.showSeconds = next.showSeconds
+            uploader.showDate = next.showDate
             uploader.animateDigits = next.animate
             uploader.animateEntry = next.animate
             uploader.color = next.color

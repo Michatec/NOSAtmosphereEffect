@@ -81,6 +81,7 @@ internal class VulkanAtmosphereHost(
     private fun applyClockConfiguration(state: AtmosphereRenderState) {
         clockTexture.style = state.clockStyle
         clockTexture.showSeconds = state.clockShowSeconds
+        clockTexture.showDate = state.clockShowDate
         clockTexture.animateDigits = state.clockAnimate
         clockTexture.animateEntry = state.clockAnimate
         clockTexture.color = state.clockColor

@@ -171,6 +171,9 @@ class AtmosphereRenderer(
     var clockShowSeconds: Boolean
         get() = clockTexture.showSeconds
         set(value) { clockTexture.showSeconds = value }
+    var clockShowDate: Boolean
+        get() = clockTexture.showDate
+        set(value) { clockTexture.showDate = value }
     var clockAnimate: Boolean
         get() = clockTexture.animateDigits
         set(value) {

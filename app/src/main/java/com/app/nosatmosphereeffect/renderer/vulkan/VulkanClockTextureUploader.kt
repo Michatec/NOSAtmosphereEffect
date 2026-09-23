@@ -43,6 +43,11 @@ internal class VulkanClockTextureUploader(context: Context) {
         get() = face.showSeconds
         set(value) { face.showSeconds = value }
 
+    /** Draws the day and date above the digits. */
+    var showDate: Boolean
+        get() = face.showDate
+        set(value) { face.showDate = value }
+
     var animateDigits: Boolean
         get() = face.animateDigits
         set(value) { face.animateDigits = value }

@@ -201,6 +201,14 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
             )
         )
     }
+    var showDate by remember {
+        mutableStateOf(
+            prefs.getBoolean(
+                AtmosphereClockPolicy.DATE_KEY,
+                AtmosphereClockPolicy.DEFAULT_DATE
+            )
+        )
+    }
     var animate by remember {
         mutableStateOf(
             prefs.getBoolean(
@@ -268,9 +276,9 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
     }
 
     var thumbnails by remember { mutableStateOf<Map<ClockStyle, ImageBitmap>>(emptyMap()) }
-    LaunchedEffect(showSeconds, hourFormat) {
+    LaunchedEffect(showSeconds, showDate, hourFormat) {
         thumbnails = withContext(Dispatchers.Default) {
-            renderStyleThumbnails(context, showSeconds, hourFormat)
+            renderStyleThumbnails(context, showSeconds, showDate, hourFormat)
         }
     }
 
@@ -290,6 +298,7 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
             putFloat(AtmosphereClockPolicy.OPACITY_KEY, opacity)
             putString(AtmosphereClockPolicy.STYLE_KEY, style.id)
             putBoolean(AtmosphereClockPolicy.SECONDS_KEY, showSeconds)
+            putBoolean(AtmosphereClockPolicy.DATE_KEY, showDate)
             putBoolean(AtmosphereClockPolicy.ANIMATE_KEY, animate)
             putInt(
                 AtmosphereClockPolicy.COLOR_KEY,
@@ -304,7 +313,7 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
 
     LaunchedEffect(
         centerX, top, heightFraction, widthScale, heightScale, opacity, style,
-        showSeconds, animate, colorPref, hourFormat
+        showSeconds, showDate, animate, colorPref, hourFormat
     ) {
         delay(350)
         persist()
@@ -360,10 +369,11 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
     // One coroutine owns the renderer, keyed on the settings that change the
     // face itself. Moving or resizing the box is not one of them: the box is
     // shader geometry, so a drag neither redraws nor re-uploads the digits.
-    LaunchedEffect(style, showSeconds, animate, resolvedColor, hourFormat) {
+    LaunchedEffect(style, showSeconds, showDate, animate, resolvedColor, hourFormat) {
         val measured = withContext(Dispatchers.Default) {
             faceRenderer.style = style
             faceRenderer.showSeconds = showSeconds
+            faceRenderer.showDate = showDate
             faceRenderer.animateDigits = animate
             faceRenderer.animateEntry = false
             faceRenderer.color = resolvedColor
@@ -535,6 +545,8 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
                 onOpacityChange = { opacity = AtmosphereClockPolicy.sanitizeOpacity(it) },
                 showSeconds = showSeconds,
                 onShowSecondsChange = { showSeconds = it },
+                showDate = showDate,
+                onShowDateChange = { showDate = it },
                 animate = animate,
                 onAnimateChange = { animate = it },
                 hourFormat = hourFormat,
@@ -572,6 +584,8 @@ private fun ClockControls(
     onOpacityChange: (Float) -> Unit,
     showSeconds: Boolean,
     onShowSecondsChange: (Boolean) -> Unit,
+    showDate: Boolean,
+    onShowDateChange: (Boolean) -> Unit,
     animate: Boolean,
     onAnimateChange: (Boolean) -> Unit,
     hourFormat: String,
@@ -698,6 +712,12 @@ private fun ClockControls(
             title = "Show seconds",
             checked = showSeconds,
             onCheckedChange = onShowSecondsChange
+        )
+        SettingSwitchRow(
+            title = "Show date",
+            checked = showDate,
+            onCheckedChange = onShowDateChange,
+            subtitle = "Puts the day and date above the clock."
         )
         SettingSwitchRow(
             title = "Animate digit changes",
@@ -1030,6 +1050,7 @@ private fun sampleWallpaperColor(
 private fun renderStyleThumbnails(
     context: Context,
     showSeconds: Boolean,
+    showDate: Boolean,
     hourFormat: String
 ): Map<ClockStyle, ImageBitmap> {
     val now = System.currentTimeMillis()
@@ -1038,6 +1059,7 @@ private fun renderStyleThumbnails(
         val renderer = ClockFaceRenderer(context).apply {
             style = candidate
             this.showSeconds = showSeconds
+            this.showDate = showDate
             animateDigits = false
             hourFormatOverride = AtmosphereClockPolicy.hourFormatOverride(hourFormat)
         }

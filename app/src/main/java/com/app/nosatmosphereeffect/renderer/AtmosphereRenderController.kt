@@ -166,6 +166,7 @@ class AtmosphereRenderController(
                 clockDepthEnabled = safe.depthEnabled,
                 clockStyleId = safe.styleId,
                 clockShowSeconds = safe.showSeconds,
+                clockShowDate = safe.showDate,
                 clockAnimate = safe.animate,
                 clockCenterX = safe.centerX,
                 clockTop = safe.top,
@@ -615,6 +616,7 @@ class AtmosphereRenderController(
         clockDepthEnabled = state.clockDepthEnabled
         clockStyle = state.clockStyle
         clockShowSeconds = state.clockShowSeconds
+        clockShowDate = state.clockShowDate
         clockAnimate = state.clockAnimate
         clockColor = state.clockColor
         clockHourFormat = state.clockHourFormat

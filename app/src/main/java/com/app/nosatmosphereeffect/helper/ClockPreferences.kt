@@ -64,6 +64,10 @@ object ClockPreferences {
                 AtmosphereClockPolicy.SECONDS_KEY,
                 AtmosphereClockPolicy.DEFAULT_SECONDS
             ),
+            showDate = preferences.readBoolean(
+                AtmosphereClockPolicy.DATE_KEY,
+                AtmosphereClockPolicy.DEFAULT_DATE
+            ),
             animate = preferences.readBoolean(
                 AtmosphereClockPolicy.ANIMATE_KEY,
                 AtmosphereClockPolicy.DEFAULT_ANIMATE
