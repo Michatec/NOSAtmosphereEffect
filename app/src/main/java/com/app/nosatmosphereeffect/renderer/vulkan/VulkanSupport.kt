@@ -285,8 +285,13 @@ private object VulkanFailureStore {
      * 2: depth clock — new clock sampler binding, uniform moved to binding 4.
      * 3: retires records written by the 7.2.3 development builds, which all
      *    shared schema 2 and therefore kept re-blocking each other.
+     * 4: the clock face became a distance field, the glass parameter changed
+     *    type across every effect's nativeSetState, and Atmosphere stopped
+     *    being routed away from Vulkan whenever the subject mask was in use.
+     *    A failure recorded before any of that says nothing about this code,
+     *    and one of those devices would otherwise never try it.
      */
-    private const val RENDERER_SCHEMA = 3
+    private const val RENDERER_SCHEMA = 4
 
     fun isBlocked(context: Context, effectId: String): Boolean {
         val preferences =

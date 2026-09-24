@@ -79,15 +79,13 @@ Four faces, in two kinds of glass, each offered as one row or two.
 
 A stacked face puts the hours above the minutes, which goes much larger on a phone, with the separator's two dots turned on their side in the gap between them. **Glass** in one row is the default.
 
-**Frost** sets how diffuse a translucent face is, from clear — the wallpaper sharp through the digits — through etched to nearly milk-white. The glass faces have no frost: they are clear except at their bevel, so frosting one would fog an edge and nothing else. **Tint** colours what comes through while leaving the highlights white.
+**Frost** sets how diffuse a translucent face is, from clear — the wallpaper sharp through the digits — through etched to nearly milk-white. The glass faces have no frost: they are clear except at their bevel, so frosting one would fog an edge and nothing else. **Tint** colours what comes through while leaving the highlights white; it offers a palette, a colour wheel, and an eyedropper that samples the wallpaper itself, and left on **Auto** it follows the image.
 
 **Show date** adds the day and date in the clock's own typeface, lit as its own piece of glass rather than as a scaled-down copy of the clock's. It gets its own box, so it is placed and sized exactly like the clock rather than being pinned above it: drag whichever box you are touching, or pick **Clock** or **Date** to be explicit.
 
 The digits are stored as distance fields rather than as pictures of glyphs, so the wallpaper rebuilds their outlines at whatever size you set rather than scaling up the pixels they were drawn at — the clock is sharp at any size, and so is the date beside it.
 
-The clock shows hours and minutes only.
-
-* **Depth effect:** Draws the photo's subject back over the clock, so the clock sits behind them, using the same on-device subject model as subject isolation (see above).
+**Depth effect** draws the photo's subject back over the clock, so the clock sits behind them, using the same on-device subject model as subject isolation (see above). The clock shows hours and minutes only, in your choice of 12- or 24-hour or whatever the system is set to.
 
 ### 2\. Select Image & Playlist Mode
 After selecting an effect, you will be prompted to choose your wallpaper mode:
@@ -213,17 +211,17 @@ This project is built using Kotlin, C++17, the Android NDK, and Gradle. The proj
 
 Atmo Engine keeps one shared codebase and combines two flavor dimensions:
 
-All artifacts in the table below use version name **7.2.3**.
+All artifacts in the table below use version name **7.2.5**. The version code carries the API tier in its leading digit and the version name in the rest, so every flavor of one release shares a name while Play still sees a higher code for the build with the higher minimum.
 
 | Flavor | Minimum Android | Target SDK | Version code | Intended release |
 | --- | ---: |-----------:|-------------:| --- |
-| `v33Play` | Android 13 / API 33 |     API 33 |     `300723` | ML Kit APK |
-| `v33Fdroid` | Android 13 / API 33 |     API 33 |     `300723` | FOSS APK for F-Droid |
-| `v33Folder` | Android 13 / API 33 |     API 33 |     `300723` | ML Kit APK with folder playlists |
-| `v35Play` | Android 15 / API 35 |     API 36 |     `400723` | Google Play ML Kit AAB |
-| `v36Play` | Android 16 / API 36 |     API 36 |     `500723` | ML Kit APK |
-| `v36Fdroid` | Android 16 / API 36 |     API 36 |     `500723` | FOSS APK |
-| `v36Folder` | Android 16 / API 36 |     API 36 |     `500723` | ML Kit APK with folder playlists |
+| `v33Play` | Android 13 / API 33 |     API 33 |     `300725` | ML Kit APK |
+| `v33Fdroid` | Android 13 / API 33 |     API 33 |     `300725` | FOSS APK for F-Droid |
+| `v33Folder` | Android 13 / API 33 |     API 33 |     `300725` | ML Kit APK with folder playlists |
+| `v35Play` | Android 15 / API 35 |     API 36 |     `400725` | Google Play ML Kit AAB |
+| `v36Play` | Android 16 / API 36 |     API 36 |     `500725` | ML Kit APK |
+| `v36Fdroid` | Android 16 / API 36 |     API 36 |     `500725` | FOSS APK |
+| `v36Folder` | Android 16 / API 36 |     API 36 |     `500725` | ML Kit APK with folder playlists |
 
 The `play` source set contains only the ML Kit implementation and explicit model-download controller. The `fdroid` source set contains only [U2NetP](https://github.com/xuebinqin/U-2-Net), its model files, and the source-built FOSS LiteRT runtime. UI, effects, playlists, palette behavior, and settings remain shared in `main`. The `folder` flavor reuses the `play` source set and additionally declares `READ_MEDIA_IMAGES` and `READ_MEDIA_VISUAL_USER_SELECTED` for folder playlists; the Play Store and F-Droid builds do not request photo access. Model and runtime provenance is recorded in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
