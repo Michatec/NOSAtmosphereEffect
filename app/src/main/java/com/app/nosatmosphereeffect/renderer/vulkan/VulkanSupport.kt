@@ -15,7 +15,6 @@ import com.app.nosatmosphereeffect.renderer.status.RendererRuntimeSession
 import com.app.nosatmosphereeffect.renderer.status.RendererRuntimeStatusRepository
 import com.app.nosatmosphereeffect.renderer.status.VulkanDeviceCapability
 import java.util.Locale
-import com.app.nosatmosphereeffect.helper.SubjectIsolationBackendPolicy
 
 internal object VulkanSupport {
     private const val TAG = "VulkanSupport"
@@ -81,22 +80,16 @@ internal object VulkanSupport {
                 fallbackReason = null
             )
         }
-        // TEMPORARY: subject isolation (clock depth, Atmosphere Glass's
-        // background-only mode) works on GLES and does not on Vulkan, so route
-        // the whole effect to GLES while any of it is switched on rather than
-        // render those features wrong. Checked before the capability probe so
-        // it costs nothing when it applies. Remove with
-        // SubjectIsolationBackendPolicy once Vulkan's mask path works.
-        if (SubjectIsolationBackendPolicy.requiresOpenGl(context, effectId)) {
-            return VulkanBackendResolution(
-                preference = preference,
-                backend = GraphicsBackend.OPENGL_ES,
-                capability = VulkanDeviceCapability.UNKNOWN,
-                probedVersion = null,
-                fallbackReason =
-                    "Subject isolation is on, which currently needs OpenGL ES"
-            )
-        }
+        // Atmosphere used to be routed to OpenGL ES here whenever anything
+        // needed the subject mask — the clock's depth effect or Glass's
+        // background-only mode — because its Vulkan host lost `hasSubject` on
+        // the way to the uniform. That host has been fixed (see the note on
+        // VulkanAtmosphereHost.updateState about reading the dynamic fields
+        // from the update's own argument), and the other five Vulkan effects
+        // have been compositing the same mask all along. The routing stayed
+        // behind as a permanent fallback for a bug that was gone, which is
+        // why asking for Vulkan appeared to do nothing and reported a failure
+        // for a clock that was working.
         val featureQuery = runCatching {
             context.packageManager.hasSystemFeature(
                 PackageManager.FEATURE_VULKAN_HARDWARE_VERSION,
