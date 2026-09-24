@@ -54,116 +54,101 @@ vec3 clockGlass(
     float opacity,
     float frostLevel
 ) {
-    float body = clockSample.a;
-    if (body <= 0.003) return color;
+    // ## What the texture holds
+    //
+    // Not coverage — a distance field. 0.5 sits exactly on the glyph's edge,
+    // 1.0 in the middle of a stroke, 0.0 a spread outside it. Everything below
+    // is geometry read straight off that: it is why the whole stroke behaves
+    // like a piece of glass instead of a pane with a bevelled rim, and why the
+    // edge stays sharp however far the texture is magnified. See
+    // ClockGlyphAtlas for how the field is built.
+    float field = clockSample.a;
+    // The silhouette is reconstructed rather than sampled: one pixel's worth
+    // of field either side of the crossing, whatever resolution the face was
+    // rasterised at. Nothing here can show its texels.
+    float softness = clamp(fwidth(field), 0.0008, 0.25);
+    float coverage = smoothstep(0.5 - softness, 0.5 + softness, field);
+    if (coverage <= 0.002) return color;
+
     vec2 texel = 1.0 / vec2(textureSize(uClockTexture, 0));
-    // Width of the rolled edge, in face texels. The face is rasterised in
-    // proportion to the size it is displayed at, so this stays the same
-    // fraction of a stroke whatever size the clock is set to.
-    const float EDGE = 14.0;
+    vec2 gradient = vec2(
+        texture(uClockTexture, clamp(clockUv + vec2(texel.x, 0.0), 0.0, 1.0)).a -
+            texture(uClockTexture, clamp(clockUv - vec2(texel.x, 0.0), 0.0, 1.0)).a,
+        texture(uClockTexture, clamp(clockUv + vec2(0.0, texel.y), 0.0, 1.0)).a -
+            texture(uClockTexture, clamp(clockUv - vec2(0.0, texel.y), 0.0, 1.0)).a
+    );
+    // The gradient of a distance field is a unit vector pointing into the
+    // shape, at every point and at every glyph size. That is the whole reason
+    // for the field: a coverage mask gives this only within a texel of the
+    // edge, and gives it wrong everywhere else.
+    vec2 inward = gradient / max(length(gradient), 1e-5);
 
-    // ## Why the edge is measured twice, and neither is a plain derivative
+    // The stroke's cross-section: a half-round bar, standing vertically at the
+    // silhouette and flattening out along its crown.
+    float depth = clamp((field - 0.5) * 2.0, 0.0, 1.0);
+    float shoulder = 1.0 - depth;
+    float lift = sqrt(max(1.0 - shoulder * shoulder, 1e-4));
+    float slope = min(shoulder / lift, 6.0);
+    vec3 normal = normalize(vec3(-inward * slope * 0.62, 1.0));
+
+    // Two things bend the wallpaper. The surface turns hardest at the
+    // silhouette and eases off across the crown; and the glass has thickness,
+    // so what is behind it is magnified about the clock's own centre.
+    // Together they are what makes the whole digit read as a lens rather than
+    // a pane with a bevelled rim.
     //
-    // The glyph's alpha is a hard edge, so a central difference of it is a
-    // *plateau*, not a ramp: it reads the same at one texel in as at ten. The
-    // first version of this lit the bevel with that number and the result was
-    // a flat band of constant brightness — a stroke drawn around the glyph
-    // rather than a surface with any thickness to it.
-    //
-    // So: the difference is used only for the DIRECTION of the edge, summed
-    // over three radii so it survives both broad stems and tight curves...
-    vec2 gradient = (
-        vec2(
-            texture(uClockTexture, clamp(clockUv + vec2(texel.x * 3.0, 0.0), 0.0, 1.0)).a -
-                texture(uClockTexture, clamp(clockUv - vec2(texel.x * 3.0, 0.0), 0.0, 1.0)).a,
-            texture(uClockTexture, clamp(clockUv + vec2(0.0, texel.y * 3.0), 0.0, 1.0)).a -
-                texture(uClockTexture, clamp(clockUv - vec2(0.0, texel.y * 3.0), 0.0, 1.0)).a
-        ) +
-        vec2(
-            texture(uClockTexture, clamp(clockUv + vec2(texel.x * 7.0, 0.0), 0.0, 1.0)).a -
-                texture(uClockTexture, clamp(clockUv - vec2(texel.x * 7.0, 0.0), 0.0, 1.0)).a,
-            texture(uClockTexture, clamp(clockUv + vec2(0.0, texel.y * 7.0), 0.0, 1.0)).a -
-                texture(uClockTexture, clamp(clockUv - vec2(0.0, texel.y * 7.0), 0.0, 1.0)).a
-        ) +
-        vec2(
-            texture(uClockTexture, clamp(clockUv + vec2(texel.x * EDGE, 0.0), 0.0, 1.0)).a -
-                texture(uClockTexture, clamp(clockUv - vec2(texel.x * EDGE, 0.0), 0.0, 1.0)).a,
-            texture(uClockTexture, clamp(clockUv + vec2(0.0, texel.y * EDGE), 0.0, 1.0)).a -
-                texture(uClockTexture, clamp(clockUv - vec2(0.0, texel.y * EDGE), 0.0, 1.0)).a
-        )
-    ) / 3.0;
-    float gradientLength = length(gradient);
-    // Alpha grows inwards, so this points into the glyph.
-    vec2 inward = gradient / max(gradientLength, 1e-4);
+    // The bend follows the shoulder rather than the surface slope, which runs
+    // away to a right angle at the silhouette: scaled by that, the edge of a
+    // stroke would sample from further away than the stroke is wide, and
+    // smear rather than refract.
+    vec2 bend = inward * (shoulder * 0.030 * rectSize.y);
+    vec2 magnify = (clockUv - 0.5) * rectSize * (0.060 * depth);
+    vec2 sampleUv = clamp(vTexCoord - bend - magnify, 0.0, 1.0);
 
-    // ...and how far inside the edge we are comes from averaging the alpha
-    // along that direction, which IS a ramp: half the samples are outside at
-    // the silhouette and none of them are once we are a full EDGE in.
-    vec2 stride = inward * texel * (EDGE * 0.25);
-    float filled =
-        texture(uClockTexture, clamp(clockUv - stride * 4.0, 0.0, 1.0)).a +
-        texture(uClockTexture, clamp(clockUv - stride * 3.0, 0.0, 1.0)).a +
-        texture(uClockTexture, clamp(clockUv - stride * 2.0, 0.0, 1.0)).a +
-        texture(uClockTexture, clamp(clockUv - stride, 0.0, 1.0)).a +
-        body +
-        texture(uClockTexture, clamp(clockUv + stride, 0.0, 1.0)).a +
-        texture(uClockTexture, clamp(clockUv + stride * 2.0, 0.0, 1.0)).a +
-        texture(uClockTexture, clamp(clockUv + stride * 3.0, 0.0, 1.0)).a +
-        texture(uClockTexture, clamp(clockUv + stride * 4.0, 0.0, 1.0)).a;
-    float depth = clamp((filled / 9.0 - 0.5) * 2.0, 0.0, 1.0);
-    // 1 at the silhouette, 0 where the edge has finished rolling over. Faded
-    // out where the direction is unreliable — along the ridge of a stroke
-    // narrower than the bevel, which is the top of the glass anyway.
-    float rim = (1.0 - depth) * smoothstep(0.02, 0.18, gradientLength);
-
-    // The profile of a quarter-round edge: vertical at the silhouette and
-    // flat by the time it reaches the top. This is what a chamfer — which is
-    // what a linear ramp would give — does not look like.
-    float lift = sqrt(max(1.0 - rim * rim, 1e-4));
-    float tilt = min(rim / lift, 5.0);
-    vec3 normal = normalize(vec3(-inward * tilt * 0.55, 1.0));
-
-    // Refraction follows the same profile, so the image bends hardest right
-    // at the edge. Scaled by the clock's own size to look the same at any.
-    vec2 sampleUv = clamp(vTexCoord - inward * (tilt * 0.012 * rectSize.y), 0.0, 1.0);
-    float frost = mix(0.0016, 0.0130, frostLevel);
+    // Frost scatters what comes through: a wider disc as it rises, and a
+    // milkier, flatter transmission with it.
+    float blur = mix(0.0012, 0.0110, frostLevel);
+    float diagonal = blur * 0.7;
     vec3 refracted = (
         2.0 * texture(uTextureSharp, sampleUv).rgb +
-        texture(uTextureSharp, clamp(sampleUv + vec2(frost, 0.0), 0.0, 1.0)).rgb +
-        texture(uTextureSharp, clamp(sampleUv - vec2(frost, 0.0), 0.0, 1.0)).rgb +
-        texture(uTextureSharp, clamp(sampleUv + vec2(0.0, frost), 0.0, 1.0)).rgb +
-        texture(uTextureSharp, clamp(sampleUv - vec2(0.0, frost), 0.0, 1.0)).rgb
-    ) / 6.0;
+        texture(uTextureSharp, clamp(sampleUv + vec2(blur, 0.0), 0.0, 1.0)).rgb +
+        texture(uTextureSharp, clamp(sampleUv - vec2(blur, 0.0), 0.0, 1.0)).rgb +
+        texture(uTextureSharp, clamp(sampleUv + vec2(0.0, blur), 0.0, 1.0)).rgb +
+        texture(uTextureSharp, clamp(sampleUv - vec2(0.0, blur), 0.0, 1.0)).rgb +
+        texture(uTextureSharp, clamp(sampleUv + vec2(diagonal, diagonal), 0.0, 1.0)).rgb +
+        texture(uTextureSharp, clamp(sampleUv - vec2(diagonal, diagonal), 0.0, 1.0)).rgb +
+        texture(uTextureSharp, clamp(sampleUv + vec2(diagonal, -diagonal), 0.0, 1.0)).rgb +
+        texture(uTextureSharp, clamp(sampleUv - vec2(diagonal, -diagonal), 0.0, 1.0)).rgb
+    ) / 10.0;
     // Whatever the effect did to the wallpaper behind the clock applies to
     // what shows through it too.
     refracted = clamp(refracted + (color - texture(uTextureSharp, vTexCoord).rgb), 0.0, 1.0);
-    // Frosted glass scatters: the more frost, the milkier and the flatter.
     float milk = dot(refracted, vec3(0.2126, 0.7152, 0.0722));
-    refracted = clamp(
-        mix(refracted, mix(refracted, vec3(milk), 0.40) + vec3(0.05), frostLevel),
-        0.0,
-        1.0
-    );
+    vec3 etched = mix(vec3(milk), vec3(1.0), 0.45);
+    refracted = mix(refracted, etched, frostLevel * 0.90);
 
-    // Light from the upper left (texture y grows downwards).
-    vec3 light = normalize(vec3(-0.5, -0.72, 0.48));
-    float facing = dot(normal, light);
-    // A broad sheen down the lit side of the roll, a tighter glint where the
-    // surface turns through the light, a bright line right on the silhouette
-    // that reads as the glass's own boundary, and shade on the far side.
-    float sheen = max(facing, 0.0) * rim;
-    float glint = pow(max(facing, 0.0), 12.0) * rim;
-    float edgeLine = smoothstep(0.80, 1.0, rim);
-    float shade = max(-facing, 0.0) * rim;
+    // A key light from the upper left (texture y grows downwards) and a dim
+    // fill from the lower right: one source alone leaves the far side of every
+    // stroke dead, where real glass picks up the whole room.
+    vec3 key = normalize(vec3(-0.45, -0.75, 0.48));
+    vec3 fill = normalize(vec3(0.55, 0.62, 0.55));
+    float facing = dot(normal, key);
+    float sheen = max(facing, 0.0) * shoulder;
+    float glint = pow(max(facing, 0.0), 22.0);
+    float bounce = max(dot(normal, fill), 0.0) * shoulder;
+    float shade = max(-facing, 0.0) * shoulder;
+    // The boundary itself: a bright hairline just inside the silhouette, which
+    // is the edge of the glass rather than an outline drawn around it.
+    float boundary = smoothstep(0.55, 1.0, shoulder);
 
-    vec3 tint = clockSample.rgb / max(clockSample.a, 0.001);
-    vec3 glass = refracted + vec3(0.02);
-    // Coloured glass: the chosen colour tints what shows through, while the
-    // highlights stay white the way real glass reflects.
+    vec3 tint = clockSample.rgb / max(field, 0.001);
+    vec3 glass = refracted;
+    // Coloured glass: the chosen colour tints what comes through, while the
+    // highlights stay white the way a reflection does.
     glass = mix(glass, glass * tint, 0.55);
-    glass += vec3(sheen * 0.40 + glint * 0.55 + edgeLine * 0.16);
-    glass -= vec3(shade * 0.30);
-    return mix(color, clamp(glass, 0.0, 1.0), body * opacity);
+    glass += vec3(sheen * 0.18 + glint * 0.55 + bounce * 0.10 + boundary * 0.14);
+    glass -= vec3(shade * 0.22);
+    return mix(color, clamp(glass, 0.0, 1.0), coverage * opacity);
 }
 
 vec3 compositeClock(vec3 color, vec2 screenCoord) {
@@ -186,7 +171,13 @@ vec3 compositeClock(vec3 color, vec2 screenCoord) {
             max(uClockGlass - 1.0, 0.0)
         );
     }
-    return mix(color, clockSample.rgb, clockSample.a * uClockOpacity);
+    // A flat face: no glass, but the silhouette still comes from the field
+    // rather than from an alpha the texture no longer carries.
+    float flatSoftness = clamp(fwidth(clockSample.a), 0.0008, 0.25);
+    float flatCoverage =
+        smoothstep(0.5 - flatSoftness, 0.5 + flatSoftness, clockSample.a);
+    vec3 flatColor = clockSample.rgb / max(clockSample.a, 0.001);
+    return mix(color, flatColor, flatCoverage * uClockOpacity);
 }
 
 // Subject mask for the clock's depth effect. These effects have no

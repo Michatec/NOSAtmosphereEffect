@@ -156,24 +156,22 @@ internal fun ClockGlassPreview(
         // Measured in face-texture texels, exactly as the wallpaper shader
         // does it, so the bevel is the same width on the same clock rather
         // than a fraction of the box (which made it far softer here).
-        // One face texel, in view pixels. The wallpaper shaders work in face
-        // texels throughout, so handing this over is what keeps the bevel the
-        // same width here as on the clock the wallpaper draws.
-        shader.setFloatUniform(
-            "texelPx",
-            (boxWidth / glyphs.width).coerceAtLeast(0.1f),
-            (boxHeight / glyphs.height).coerceAtLeast(0.1f)
-        )
-        // The wallpaper offsets in texture UV, where x spans the width and y
-        // the height, so the same UV step is fewer pixels across than down.
+        // The wallpaper shaders work in texture UV, where x spans the width
+        // and y the height, so the same UV step is fewer pixels across than
+        // down. These convert each of their offsets into view pixels.
         val refraction = REFRACTION_FRACTION * boxHeight
         shader.setFloatUniform(
             "refraction",
             refraction * viewWidth / viewHeight,
             refraction
         )
-        val frostUv = FROST_MIN + (FROST_MAX - FROST_MIN) * frost.coerceIn(0f, 1f)
-        shader.setFloatUniform("frost", frostUv * viewWidth, frostUv * viewHeight)
+        shader.setFloatUniform(
+            "magnification",
+            MAGNIFICATION * boxWidth,
+            MAGNIFICATION * boxHeight
+        )
+        shader.setFloatUniform("blurMin", FROST_MIN * viewWidth, FROST_MIN * viewHeight)
+        shader.setFloatUniform("blurMax", FROST_MAX * viewWidth, FROST_MAX * viewHeight)
         shader.setFloatUniform("frostLevel", frost.coerceIn(0f, 1f))
         shader.setFloatUniform("opacity", opacity.coerceIn(0f, 1f))
         paint.shader = shader
@@ -181,35 +179,28 @@ internal fun ClockGlassPreview(
     }
 }
 
-/** The refraction offset per unit of tilt, as a fraction of the clock's height. */
-private const val REFRACTION_FRACTION = 0.012f
+/** The refraction offset at the silhouette, as a fraction of the clock's height. */
+private const val REFRACTION_FRACTION = 0.030f
+/** How much the glass magnifies what is behind it, at the crown of a stroke. */
+private const val MAGNIFICATION = 0.060f
 /** The frost blur radius in wallpaper UV, at no frost and at full frost. */
-private const val FROST_MIN = 0.0016f
-private const val FROST_MAX = 0.0130f
+private const val FROST_MIN = 0.0012f
+private const val FROST_MAX = 0.0110f
 
 private const val GLASS_AGSL = """
 uniform shader wallpaper;
 uniform shader face;
 uniform float2 boxOrigin;
 uniform float2 boxSize;
-uniform float2 texelPx;
 uniform float2 refraction;
-uniform float2 frost;
+uniform float2 magnification;
+uniform float2 blurMin;
+uniform float2 blurMax;
 uniform float frostLevel;
 uniform float opacity;
 
-const float EDGE = 14.0;
-
-float faceAlpha(float2 coord) {
+float faceField(float2 coord) {
     return float(face.eval(coord).a);
-}
-
-float2 faceGradient(float2 coord, float radius) {
-    float2 step = texelPx * radius;
-    return float2(
-        faceAlpha(coord + float2(step.x, 0.0)) - faceAlpha(coord - float2(step.x, 0.0)),
-        faceAlpha(coord + float2(0.0, step.y)) - faceAlpha(coord - float2(0.0, step.y))
-    );
 }
 
 half4 main(float2 coord) {
@@ -218,67 +209,68 @@ half4 main(float2 coord) {
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
         return half4(half3(base), 1.0);
     }
+
+    // A port of clockGlass in the effect shaders; see the comments there. The
+    // face texture holds a distance field, so the silhouette is reconstructed
+    // here rather than sampled, and the gradient is a true surface direction.
     float4 glyph = float4(face.eval(coord));
-    float body = glyph.a;
-    if (body <= 0.003) {
+    float field = glyph.a;
+    // AGSL has no derivatives, so the field's slope per pixel is measured
+    // directly — which is the same number fwidth would have returned.
+    float2 gradient = 0.5 * float2(
+        faceField(coord + float2(1.0, 0.0)) - faceField(coord - float2(1.0, 0.0)),
+        faceField(coord + float2(0.0, 1.0)) - faceField(coord - float2(0.0, 1.0))
+    );
+    float softness = clamp(length(gradient), 0.0008, 0.25);
+    float coverage = smoothstep(0.5 - softness, 0.5 + softness, field);
+    if (coverage <= 0.002) {
         return half4(half3(base), 1.0);
     }
+    float2 inward = gradient / max(length(gradient), 1e-5);
 
-    // A port of clockGlass in the effect shaders — see the comments there for
-    // why the edge is measured this way rather than with a derivative.
-    float2 gradient = (
-        faceGradient(coord, 3.0) + faceGradient(coord, 7.0) + faceGradient(coord, EDGE)
-    ) / 3.0;
-    float gradientLength = length(gradient);
-    float2 inward = gradient / max(gradientLength, 1e-4);
+    float depth = clamp((field - 0.5) * 2.0, 0.0, 1.0);
+    float shoulder = 1.0 - depth;
+    float lift = sqrt(max(1.0 - shoulder * shoulder, 1e-4));
+    float slope = min(shoulder / lift, 6.0);
+    float3 normal = normalize(float3(-inward * slope * 0.62, 1.0));
 
-    float2 stride = inward * texelPx * (EDGE * 0.25);
-    float filled =
-        faceAlpha(coord - stride * 4.0) +
-        faceAlpha(coord - stride * 3.0) +
-        faceAlpha(coord - stride * 2.0) +
-        faceAlpha(coord - stride) +
-        body +
-        faceAlpha(coord + stride) +
-        faceAlpha(coord + stride * 2.0) +
-        faceAlpha(coord + stride * 3.0) +
-        faceAlpha(coord + stride * 4.0);
-    float depth = clamp((filled / 9.0 - 0.5) * 2.0, 0.0, 1.0);
-    float rim = (1.0 - depth) * smoothstep(0.02, 0.18, gradientLength);
+    // The shoulder, not the slope: see the note in the effect shaders.
+    float2 bend = inward * shoulder * refraction;
+    float2 magnify = (uv - 0.5) * magnification * depth;
+    float2 at = coord - bend - magnify;
 
-    float lift = sqrt(max(1.0 - rim * rim, 1e-4));
-    float tilt = min(rim / lift, 5.0);
-    float3 normal = normalize(float3(-inward * tilt * 0.55, 1.0));
-
-    float2 at = coord - inward * tilt * refraction;
+    float2 blur = mix(blurMin, blurMax, frostLevel);
+    float2 diagonal = blur * 0.7;
     float3 refracted = (
         2.0 * float3(wallpaper.eval(at).rgb) +
-        float3(wallpaper.eval(at + float2(frost.x, 0.0)).rgb) +
-        float3(wallpaper.eval(at - float2(frost.x, 0.0)).rgb) +
-        float3(wallpaper.eval(at + float2(0.0, frost.y)).rgb) +
-        float3(wallpaper.eval(at - float2(0.0, frost.y)).rgb)
-    ) / 6.0;
+        float3(wallpaper.eval(at + float2(blur.x, 0.0)).rgb) +
+        float3(wallpaper.eval(at - float2(blur.x, 0.0)).rgb) +
+        float3(wallpaper.eval(at + float2(0.0, blur.y)).rgb) +
+        float3(wallpaper.eval(at - float2(0.0, blur.y)).rgb) +
+        float3(wallpaper.eval(at + diagonal).rgb) +
+        float3(wallpaper.eval(at - diagonal).rgb) +
+        float3(wallpaper.eval(at + float2(diagonal.x, -diagonal.y)).rgb) +
+        float3(wallpaper.eval(at - float2(diagonal.x, -diagonal.y)).rgb)
+    ) / 10.0;
     float milk = dot(refracted, float3(0.2126, 0.7152, 0.0722));
-    refracted = clamp(
-        mix(refracted, mix(refracted, float3(milk), 0.40) + float3(0.05), frostLevel),
-        0.0,
-        1.0
-    );
+    float3 etched = mix(float3(milk), float3(1.0), 0.45);
+    refracted = mix(refracted, etched, frostLevel * 0.90);
 
-    // Light from the upper left (y grows downwards).
-    float3 light = normalize(float3(-0.5, -0.72, 0.48));
-    float facing = dot(normal, light);
-    float sheen = max(facing, 0.0) * rim;
-    float glint = pow(max(facing, 0.0), 12.0) * rim;
-    float edgeLine = smoothstep(0.80, 1.0, rim);
-    float shade = max(-facing, 0.0) * rim;
+    float3 key = normalize(float3(-0.45, -0.75, 0.48));
+    float3 fill = normalize(float3(0.55, 0.62, 0.55));
+    float facing = dot(normal, key);
+    float sheen = max(facing, 0.0) * shoulder;
+    float glint = pow(max(facing, 0.0), 22.0);
+    float bounce = max(dot(normal, fill), 0.0) * shoulder;
+    float shade = max(-facing, 0.0) * shoulder;
+    float boundary = smoothstep(0.55, 1.0, shoulder);
 
-    float3 tint = glyph.rgb / max(glyph.a, 0.001);
-    float3 glass = refracted + float3(0.02);
+    float3 tint = glyph.rgb / max(field, 0.001);
+    float3 glass = refracted;
     glass = mix(glass, glass * tint, 0.55);
-    glass = glass + float3(sheen * 0.40 + glint * 0.55 + edgeLine * 0.16);
-    glass = glass - float3(shade * 0.30);
-    float3 result = mix(base, clamp(glass, 0.0, 1.0), body * opacity);
+    glass = glass + float3(sheen * 0.18 + glint * 0.55 + bounce * 0.10 + boundary * 0.14);
+    glass = glass - float3(shade * 0.22);
+    float3 result = mix(base, clamp(glass, 0.0, 1.0), coverage * opacity);
     return half4(half3(result), 1.0);
 }
 """

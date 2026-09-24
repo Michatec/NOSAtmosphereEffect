@@ -72,14 +72,16 @@ If Canvas Sketch cannot find a confident foreground subject, it falls back to sk
 
 Every effect can draw a clock into the wallpaper itself (Advanced Settings → Clock; single-image mode only). **Choose style, position & size** opens a live preview of the clock on your wallpaper. A box is drawn around it: drag inside the box to move the clock, drag a corner to change both dimensions or an edge to change one, and a centre guide lights up when it is exactly centred. There are no size sliders — the box is the size. The clock is also always shown in the wallpaper picker's preview, whichever screen it is set to appear on.
 
-Two faces, both made of glass: the wallpaper shows through the digits, bending hardest where the edge rolls over, and the rolled edge catches the light along a bright contour the way a thick piece of glass does.
+Two faces, both made of glass. Each digit is a solid piece of it: the wallpaper bends as it passes through, hardest where the stroke rolls over at its edge and gently across the middle, and what is behind the glass is magnified the way thickness magnifies. The edges carry a bright contour and a highlight where they turn through the light.
 
-* **Glass:** hours and minutes side by side.
+* **Glass:** hours and minutes side by side — the default.
 * **Glass Stacked:** hours above minutes, which goes much larger on a phone.
 
-**Frost** sets how diffuse the glass is, from clear — the wallpaper sharp through the digits — to milky. **Tint** colours what shows through while leaving the highlights white.
+**Frost** sets how diffuse the glass is, from clear — the wallpaper sharp through the digits — through etched to nearly milk-white. **Tint** colours what comes through while leaving the highlights white.
 
-**Show date** adds the day and date in the clock's own typeface. It gets its own box, so it is placed and sized exactly like the clock rather than being pinned above it: drag whichever box you are touching, or pick **Clock** or **Date** to be explicit.
+**Show date** adds the day and date in the clock's own typeface, lit as its own piece of glass rather than as a scaled-down copy of the clock's. It gets its own box, so it is placed and sized exactly like the clock rather than being pinned above it: drag whichever box you are touching, or pick **Clock** or **Date** to be explicit.
+
+The digits are stored as distance fields rather than as pictures of glyphs, so the wallpaper rebuilds their outlines at whatever size you set rather than scaling up the pixels they were drawn at — the clock is sharp at any size, and so is the date beside it.
 
 The clock shows hours and minutes only.
 

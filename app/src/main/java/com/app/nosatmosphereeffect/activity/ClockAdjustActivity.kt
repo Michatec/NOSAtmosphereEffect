@@ -1194,9 +1194,9 @@ private fun renderStyleThumbnails(
             val targetHeight = (rendered.height.toFloat() * targetWidth / rendered.width)
                 .toInt()
                 .coerceAtLeast(1)
-            result[candidate] =
+            result[candidate] = silhouette(
                 Bitmap.createScaledBitmap(rendered, targetWidth, targetHeight, true)
-                    .asImageBitmap()
+            ).asImageBitmap()
         } catch (_: RuntimeException) {
             // A face that will not render is left out of the gallery.
         } catch (_: OutOfMemoryError) {
@@ -1206,6 +1206,33 @@ private fun renderStyleThumbnails(
         }
     }
     return result
+}
+
+/**
+ * Turns a face bitmap into something that can simply be shown.
+ *
+ * The face holds a distance field rather than coverage — the wallpaper shader
+ * reconstructs the digits from it, which is what keeps them sharp at any size
+ * — so drawing one straight into a thumbnail would show a soft blur instead of
+ * a clock. This does the same reconstruction the shader does: the silhouette
+ * is where the field crosses its midpoint.
+ */
+private fun silhouette(face: Bitmap): Bitmap {
+    val width = face.width
+    val height = face.height
+    if (width <= 0 || height <= 0) return face
+    val pixels = IntArray(width * height)
+    face.getPixels(pixels, 0, width, 0, 0, width, height)
+    for (index in pixels.indices) {
+        val field = (pixels[index] ushr 24) / 255f
+        // A couple of the scaled bitmap's pixels of softness, which is all the
+        // anti-aliasing a thumbnail needs.
+        val coverage = ((field - 0.5f) / 0.08f + 0.5f).coerceIn(0f, 1f)
+        val alpha = (coverage * 255f).toInt().coerceIn(0, 255)
+        pixels[index] = (alpha shl 24) or 0x00FFFFFF
+    }
+    face.setPixels(pixels, 0, width, 0, 0, width, height)
+    return face
 }
 
 /** Stands in for the date's real ratio until the face has been measured. */
