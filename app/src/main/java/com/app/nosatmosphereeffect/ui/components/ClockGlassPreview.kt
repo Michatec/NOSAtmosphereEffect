@@ -46,13 +46,11 @@ internal fun ClockGlassPreview(
     /** Where the face goes, as fractions of this view. */
     box: ClockBoxRect,
     opacity: Float,
-    /** How frosted the glass is, 0..1. */
-    frost: Float,
     /**
-     * False for a flat face, which is drawn as it is rather than as something
-     * the wallpaper refracts through.
+     * The shaders' own glass number: 3 is the original glass face, and
+     * `1 + frost` a translucent one — see [ClockOverlayState.glassMeta].
      */
-    glass: Boolean,
+    mode: Float,
     /** Changes whenever [face] has been redrawn in place. */
     faceRevision: Int,
     modifier: Modifier = Modifier
@@ -111,7 +109,7 @@ internal fun ClockGlassPreview(
         val boxTop = box.top * viewHeight
         val boxWidth = box.width * viewWidth
         val boxHeight = box.height * viewHeight
-        val drawGlass = glass &&
+        val drawGlass = mode > 0.5f &&
             shader != null &&
             faceShader != null &&
             glyphs != null &&
@@ -124,7 +122,7 @@ internal fun ClockGlassPreview(
             drawIntoCanvas { it.nativeCanvas.drawRect(0f, 0f, viewWidth, viewHeight, paint) }
             // Either the face is solid, or the runtime shader is unavailable
             // and the clock still has to be visible to be positioned.
-            if ((!glass || shader == null) &&
+            if ((mode <= 0.5f || shader == null) &&
                 glyphs != null &&
                 opacity > 0f &&
                 boxWidth > 1f
@@ -172,7 +170,17 @@ internal fun ClockGlassPreview(
         )
         shader.setFloatUniform("blurMin", FROST_MIN * viewWidth, FROST_MIN * viewHeight)
         shader.setFloatUniform("blurMax", FROST_MAX * viewWidth, FROST_MAX * viewHeight)
-        shader.setFloatUniform("frostLevel", frost.coerceIn(0f, 1f))
+        shader.setFloatUniform("mode", mode)
+        shader.setFloatUniform(
+            "refractionClassic",
+            CLASSIC_REFRACTION * boxHeight * viewWidth / viewHeight,
+            CLASSIC_REFRACTION * boxHeight
+        )
+        shader.setFloatUniform(
+            "blurClassic",
+            CLASSIC_BLUR * viewWidth,
+            CLASSIC_BLUR * viewHeight
+        )
         shader.setFloatUniform("opacity", opacity.coerceIn(0f, 1f))
         paint.shader = shader
         drawIntoCanvas { it.nativeCanvas.drawRect(0f, 0f, viewWidth, viewHeight, paint) }
@@ -183,6 +191,9 @@ internal fun ClockGlassPreview(
 private const val REFRACTION_FRACTION = 0.030f
 /** How much the glass magnifies what is behind it, at the crown of a stroke. */
 private const val MAGNIFICATION = 0.060f
+/** The original face's refraction and softening, as it has always had them. */
+private const val CLASSIC_REFRACTION = 0.11f
+private const val CLASSIC_BLUR = 0.0032f
 /** The frost blur radius in wallpaper UV, at no frost and at full frost. */
 private const val FROST_MIN = 0.0012f
 private const val FROST_MAX = 0.0110f
@@ -193,10 +204,12 @@ uniform shader face;
 uniform float2 boxOrigin;
 uniform float2 boxSize;
 uniform float2 refraction;
+uniform float2 refractionClassic;
 uniform float2 magnification;
 uniform float2 blurMin;
 uniform float2 blurMax;
-uniform float frostLevel;
+uniform float2 blurClassic;
+uniform float mode;
 uniform float opacity;
 
 float faceField(float2 coord) {
@@ -227,20 +240,43 @@ half4 main(float2 coord) {
         return half4(half3(base), 1.0);
     }
     float2 inward = gradient / max(length(gradient), 1e-5);
-
     float depth = clamp((field - 0.5) * 2.0, 0.0, 1.0);
+    float3 tint = glyph.rgb / max(field, 0.001);
+    float3 light = normalize(float3(-0.5, -0.72, 0.48));
+
+    if (mode >= 2.5) {
+        float edge = 1.0 - smoothstep(0.40, 0.64, depth);
+        float2 slope = inward * 0.5 * edge;
+        float2 at = coord - slope * refractionClassic;
+        float3 refracted = (
+            2.0 * float3(wallpaper.eval(at).rgb) +
+            float3(wallpaper.eval(at + float2(blurClassic.x, 0.0)).rgb) +
+            float3(wallpaper.eval(at - float2(blurClassic.x, 0.0)).rgb) +
+            float3(wallpaper.eval(at + float2(0.0, blurClassic.y)).rgb) +
+            float3(wallpaper.eval(at - float2(0.0, blurClassic.y)).rgb)
+        ) / 6.0;
+        float3 normal = normalize(float3(-slope * 2.4, 1.0));
+        float specular = pow(max(dot(normal, light), 0.0), 22.0) * edge;
+        float rim = smoothstep(0.12, 0.85, edge);
+        float shade = max(-dot(normal.xy, light.xy), 0.0) * edge;
+        float3 glass = refracted * 1.05 + float3(0.035);
+        glass = mix(glass, glass * tint, 0.55);
+        glass = glass + float3(rim * 0.20 + specular * 0.9);
+        glass = glass - float3(shade * 0.14);
+        float3 classic = mix(base, clamp(glass, 0.0, 1.0), coverage * opacity);
+        return half4(half3(classic), 1.0);
+    }
+
+    float frostLevel = clamp(mode - 1.0, 0.0, 1.0);
     float shoulder = 1.0 - depth;
     float lift = sqrt(max(1.0 - shoulder * shoulder, 1e-4));
     float slope = min(shoulder / lift, 6.0);
     float3 normal = normalize(float3(-inward * slope * 0.62, 1.0));
 
-    // The shoulder, not the slope: see the note in the effect shaders.
     float2 bend = inward * shoulder * refraction;
     float2 magnify = (uv - 0.5) * magnification * depth;
     float2 at = coord - bend - magnify;
 
-    // Nothing is sampled for frost until there is some — see the effect
-    // shaders, which take the same branch.
     float3 refracted = float3(wallpaper.eval(at).rgb);
     if (frostLevel > 0.004) {
         float2 blur = mix(blurMin, blurMax, frostLevel);
@@ -258,16 +294,14 @@ half4 main(float2 coord) {
         ) / 10.0;
     }
 
-    float3 tint = glyph.rgb / max(field, 0.001);
     float3 glass = mix(refracted, refracted * tint, 0.55);
     if (frostLevel > 0.004) {
         float milk = dot(glass, float3(0.2126, 0.7152, 0.0722));
         glass = mix(glass, tint * (0.55 + 0.45 * milk), frostLevel * 0.92);
     }
 
-    float3 key = normalize(float3(-0.45, -0.75, 0.48));
     float3 fill = normalize(float3(0.55, 0.62, 0.55));
-    float facing = dot(normal, key);
+    float facing = dot(normal, light);
     float turn = shoulder * shoulder * shoulder;
     float sheen = max(facing, 0.0) * turn;
     float glint = pow(max(facing, 0.0), 22.0) * shoulder;

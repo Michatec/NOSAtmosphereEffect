@@ -289,7 +289,13 @@ class ClockFaceGeometryTest {
     @Test
     fun `every style stays inside its shaping limits`() {
         ClockStyle.entries.forEach { style ->
-            assertTrue("${style.id} should be a glass face", style.liquidGlass)
+            // Only the translucent faces are glass all the way through, and
+            // frost only means anything on those.
+            assertEquals(
+                "${style.id} disagrees about frost",
+                style.treatment == ClockTreatment.TRANSLUCENT,
+                style.usesFrost
+            )
             assertTrue(
                 "${style.id} has an out-of-range horizontal scale",
                 style.horizontalScale in 0.8f..1f
@@ -322,11 +328,40 @@ class ClockFaceGeometryTest {
     }
 
     @Test
-    fun `the offered faces are the two glass ones`() {
+    fun `each treatment is offered in one row and in two`() {
         assertEquals(
-            listOf("liquid_glass", "liquid_glass_stacked"),
+            listOf("liquid_glass", "liquid_glass_stacked", "translucent", "translucent_stacked"),
             ClockStyle.entries.map { it.id }
         )
+        ClockTreatment.entries.forEach { treatment ->
+            val faces = ClockStyle.entries.filter { it.treatment == treatment }
+            assertEquals("$treatment should have two faces", 2, faces.size)
+            assertEquals(
+                "$treatment should have one of each shape",
+                listOf(false, true),
+                faces.map { it.stacked }
+            )
+        }
+    }
+
+    @Test
+    fun `the original glass face is the default`() {
+        // It is the one that shipped, and the one people have been using.
+        assertEquals("liquid_glass", ClockStyle.DEFAULT.id)
+        assertEquals(ClockTreatment.GLASS, ClockStyle.DEFAULT.treatment)
+        assertTrue(!ClockStyle.DEFAULT.stacked)
+    }
+
+    @Test
+    fun `the shaders can tell the treatments apart`() {
+        // One float carries the treatment and the frost level to both
+        // backends; 3 is the original face and 1 + frost a translucent one.
+        val glass = ClockOverlayState(styleId = "liquid_glass", frost = 0.8f)
+        val translucent = ClockOverlayState(styleId = "translucent", frost = 0.8f)
+        assertEquals(3f, glass.glassMeta, 1e-5f)
+        assertEquals(1.8f, translucent.glassMeta, 1e-5f)
+        // Frost cannot leak into the original face, whatever is stored.
+        assertEquals(glass.glassMeta, glass.copy(frost = 0f).glassMeta, 0f)
     }
 
     @Test
@@ -337,7 +372,9 @@ class ClockFaceGeometryTest {
         // using it back to the default.
         listOf(
             "liquid_glass",
-            "liquid_glass_stacked"
+            "liquid_glass_stacked",
+            "translucent",
+            "translucent_stacked"
         ).forEach { id ->
             assertEquals(id, ClockStyle.fromId(id).id)
         }

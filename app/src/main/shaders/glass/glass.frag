@@ -50,20 +50,17 @@ vec3 clockGlass(
     vec4 clockSample,
     vec2 rectSize,
     float opacity,
-    float frostLevel
+    float mode
 ) {
     // ## What the texture holds
     //
     // Not coverage — a distance field. 0.5 sits exactly on the glyph's edge,
     // 1.0 in the middle of a stroke, 0.0 a spread outside it. Everything below
-    // is geometry read straight off that: it is why the whole stroke behaves
-    // like a piece of glass instead of a pane with a bevelled rim, and why the
-    // edge stays sharp however far the texture is magnified. See
-    // ClockGlyphAtlas for how the field is built.
+    // is geometry read straight off that, which is why the edge stays sharp
+    // however far the texture is magnified: it is rebuilt here rather than
+    // scaled up from the pixels the face was rasterised at. See
+    // ClockGlyphAtlas for how the field is made.
     float field = clockSample.a;
-    // The silhouette is reconstructed rather than sampled: one pixel's worth
-    // of field either side of the crossing, whatever resolution the face was
-    // rasterised at. Nothing here can show its texels.
     float softness = clamp(fwidth(field), 0.0008, 0.25);
     float coverage = smoothstep(0.5 - softness, 0.5 + softness, field);
     if (coverage <= 0.002) return color;
@@ -76,25 +73,68 @@ vec3 clockGlass(
             texture(clockTexture, clamp(clockUv - vec2(0.0, texel.y), 0.0, 1.0)).a
     );
     // The gradient of a distance field is a unit vector pointing into the
-    // shape, at every point and at every glyph size. That is the whole reason
-    // for the field: a coverage mask gives this only within a texel of the
-    // edge, and gives it wrong everywhere else.
+    // shape, at every point and at every glyph size. A coverage mask gives
+    // this only within a texel of the edge, and gives it wrong everywhere
+    // else — which is what used to leave small glyphs, the date especially,
+    // lit in patches.
     vec2 inward = gradient / max(length(gradient), 1e-5);
-
-    // The stroke's cross-section: a half-round bar, standing vertically at the
-    // silhouette and flattening out along its crown.
+    // 0 on the silhouette, 1 in the middle of the stroke.
     float depth = clamp((field - 0.5) * 2.0, 0.0, 1.0);
+    vec3 tint = clockSample.rgb / max(field, 0.001);
+    // Light from the upper left (texture y grows downwards).
+    vec3 light = normalize(vec3(-0.5, -0.72, 0.48));
+
+    // ## The original glass face
+    //
+    // Clear through the middle, with the light caught around a bevel at the
+    // edge of every stroke. The numbers below are the ones this face has
+    // always had; what has changed is where the bevel comes from. It used to
+    // be a difference of the coverage mask taken nine texels apart, which is
+    // a band of fixed pixel width — so it thickened or thinned with whatever
+    // resolution the face happened to be rasterised at. Measured off the
+    // field instead, it is the same fraction of a stroke at every size.
+    if (mode >= 2.5) {
+        float edge = 1.0 - smoothstep(0.40, 0.64, depth);
+        vec2 slope = inward * 0.5 * edge;
+        vec2 classicUv = clamp(vTexCoord - slope * (0.11 * rectSize.y), 0.0, 1.0);
+        const float classicBlur = 0.0032;
+        vec3 classicRefracted = (
+            2.0 * texture(sourceTexture, classicUv).rgb +
+            texture(sourceTexture, clamp(classicUv + vec2(classicBlur, 0.0), 0.0, 1.0)).rgb +
+            texture(sourceTexture, clamp(classicUv - vec2(classicBlur, 0.0), 0.0, 1.0)).rgb +
+            texture(sourceTexture, clamp(classicUv + vec2(0.0, classicBlur), 0.0, 1.0)).rgb +
+            texture(sourceTexture, clamp(classicUv - vec2(0.0, classicBlur), 0.0, 1.0)).rgb
+        ) / 6.0;
+        classicRefracted = clamp(
+            classicRefracted + (color - texture(sourceTexture, vTexCoord).rgb),
+            0.0,
+            1.0
+        );
+        vec3 classicNormal = normalize(vec3(-slope * 2.4, 1.0));
+        float specular = pow(max(dot(classicNormal, light), 0.0), 22.0) * edge;
+        float rim = smoothstep(0.12, 0.85, edge);
+        float classicShade = max(-dot(classicNormal.xy, light.xy), 0.0) * edge;
+        vec3 classic = classicRefracted * 1.05 + vec3(0.035);
+        // Coloured glass: the chosen colour tints what shows through, while
+        // the rim and the specular stay white the way real glass reflects.
+        classic = mix(classic, classic * tint, 0.55);
+        classic += vec3(rim * 0.20 + specular * 0.9);
+        classic -= vec3(classicShade * 0.14);
+        return mix(color, clamp(classic, 0.0, 1.0), coverage * opacity);
+    }
+
+    // ## The translucent face
+    //
+    // The whole digit is one piece of glass rather than a clear pane with a
+    // bevelled rim: a half-round cross-section across the entire stroke, so
+    // the wallpaper bends all the way across it, and a magnification for the
+    // thickness. Frost takes it from clear through etched to milk.
+    float frostLevel = clamp(mode - 1.0, 0.0, 1.0);
     float shoulder = 1.0 - depth;
     float lift = sqrt(max(1.0 - shoulder * shoulder, 1e-4));
     float slope = min(shoulder / lift, 6.0);
     vec3 normal = normalize(vec3(-inward * slope * 0.62, 1.0));
 
-    // Two things bend the wallpaper. The surface turns hardest at the
-    // silhouette and eases off across the crown; and the glass has thickness,
-    // so what is behind it is magnified about the clock's own centre.
-    // Together they are what makes the whole digit read as a lens rather than
-    // a pane with a bevelled rim.
-    //
     // The bend follows the shoulder rather than the surface slope, which runs
     // away to a right angle at the silhouette: scaled by that, the edge of a
     // stroke would sample from further away than the stroke is wide, and
@@ -103,10 +143,9 @@ vec3 clockGlass(
     vec2 magnify = (clockUv - 0.5) * rectSize * (0.060 * depth);
     vec2 sampleUv = clamp(vTexCoord - bend - magnify, 0.0, 1.0);
 
-    // Frost scatters what comes through. Nothing is sampled for it until
-    // there is some: the level is a uniform, so this branch is taken by the
-    // whole draw or none of it, and a clear clock costs eight fewer fetches
-    // per pixel than a frosted one.
+    // Nothing is sampled for frost until there is some: the level is a
+    // uniform, so this branch is taken by the whole draw or none of it, and a
+    // clear clock costs eight fewer fetches per pixel than a frosted one.
     vec3 refracted = texture(sourceTexture, sampleUv).rgb;
     if (frostLevel > 0.004) {
         float blur = mix(0.0012, 0.0110, frostLevel);
@@ -127,8 +166,6 @@ vec3 clockGlass(
     // what shows through it too.
     refracted = clamp(refracted + (color - texture(sourceTexture, vTexCoord).rgb), 0.0, 1.0);
 
-    vec3 tint = clockSample.rgb / max(field, 0.001);
-    // Coloured glass: the chosen colour tints what comes through.
     vec3 glass = mix(refracted, refracted * tint, 0.55);
     if (frostLevel > 0.004) {
         // Etched glass takes the colour it was given and lets what is behind
@@ -139,12 +176,10 @@ vec3 clockGlass(
         glass = mix(glass, tint * (0.55 + 0.45 * milk), frostLevel * 0.92);
     }
 
-    // A key light from the upper left (texture y grows downwards) and a dim
-    // fill from the lower right: one source alone leaves the far side of every
-    // stroke dead, where real glass picks up the whole room.
-    vec3 key = normalize(vec3(-0.45, -0.75, 0.48));
+    // A dim fill from the lower right: the key light alone leaves the far side
+    // of every stroke dead, where real glass picks up the whole room.
     vec3 fill = normalize(vec3(0.55, 0.62, 0.55));
-    float facing = dot(normal, key);
+    float facing = dot(normal, light);
     // Concentrated into the turn of the edge rather than spread across the
     // shoulder: over the whole shoulder it reads as a white band frosting the
     // inside of every stroke, which is the opposite of one piece of glass.
@@ -181,15 +216,15 @@ vec3 compositeClock(vec3 color, vec2 screenCoord) {
     }
     vec4 clockSample = texture(clockTexture, clockUv);
     if (params.clockMeta.w > 0.5) {
-        // Above 1 is glass, and the fraction is the frost level — see
-        // ClockOverlayState.glassMeta.
+        // 3 is the original glass face and 1 + frost a translucent one —
+        // see ClockOverlayState.glassMeta.
         return clockGlass(
             color,
             clockUv,
             clockSample,
             clockSize,
             params.clockMeta.x,
-            max(params.clockMeta.w - 1.0, 0.0)
+            params.clockMeta.w
         );
     }
     // A flat face: no glass, but the silhouette still comes from the field
