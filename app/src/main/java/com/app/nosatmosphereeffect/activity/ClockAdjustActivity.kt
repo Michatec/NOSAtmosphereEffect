@@ -585,10 +585,12 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
                     )
                 }
                 Text(
-                    if (eyedropperArmed) {
-                        "Tap the wallpaper to pick a colour"
-                    } else {
-                        "Drag the box to move · corners resize · tap to hide"
+                    when {
+                        eyedropperArmed -> "Tap the wallpaper to pick a colour"
+                        showDate ->
+                            "Dragging the ${if (editingDate) "date" else "clock"} · " +
+                                "tap the other box to switch"
+                        else -> "Drag the box to move · corners resize · tap to hide"
                     },
                     color = Color.White,
                     style = MaterialTheme.typography.bodyMedium,
