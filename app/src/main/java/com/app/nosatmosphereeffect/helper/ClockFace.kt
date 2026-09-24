@@ -781,6 +781,17 @@ class ClockFaceRenderer(private val context: Context) {
 
         val glyphScale = face.glyphScale * scale * entryScale
         val spread = ClockGlyphAtlas.SPREAD_EM * ClockGlyphAtlas.CANONICAL_EM
+        // A typeface sets its colon low, against the baseline, because it
+        // normally separates words of lowercase. Between two digits it wants
+        // to be in the middle of them, so it is moved there — the only glyph
+        // that is placed by its ink rather than by its baseline.
+        val centring = if (character == ':') {
+            val tileInkCentre = (tile.inkTop + tile.inkBottom) / 2f - tile.baseline
+            val digitsInkCentre = face.inkHeight / 2f - face.inkAboveBaseline
+            digitsInkCentre - tileInkCentre * glyphScale
+        } else {
+            0f
+        }
         // The advance box is centred on the slot and the tile's baseline lands
         // on the row's, so the glyph scales about the point it sits on rather
         // than drifting as it grows.
@@ -788,7 +799,7 @@ class ClockFaceRenderer(private val context: Context) {
         glyphMatrix.setScale(glyphScale, glyphScale)
         glyphMatrix.postTranslate(
             centerX - (tile.advance / 2f + spread) * glyphScale,
-            baseline + offsetY + entryRise - tile.baseline * glyphScale
+            baseline + offsetY + entryRise + centring - tile.baseline * glyphScale
         )
         tilePaint.color = color
         tilePaint.alpha = erosionAlpha(clamped)
@@ -1022,12 +1033,14 @@ class ClockFaceRenderer(private val context: Context) {
             bitmapWidth = digitsWidth + sideExtent * 2f,
             bitmapHeight = digitsHeight + topExtent + bottomExtent,
             // Centred in the gap between the rows, and only there: a single
-            // row already has its separator in the middle of the row.
+            // row carries its separator inline.
             separatorY = if (rows.size > 1) {
                 digitsTop + inkHeight + rowGap / 2f
             } else {
                 null
             },
+            inkAboveBaseline = baselineFromInkTop,
+            inkHeight = inkHeight,
             contentAspect = contentAspect,
             dateText = dateText,
             dateBox = dateBox,
@@ -1238,6 +1251,9 @@ class ClockFaceRenderer(private val context: Context) {
         val bitmapHeight: Float,
         /** Where the stacked separator's centre goes; null on a single row. */
         val separatorY: Float?,
+        /** A row's ink above its baseline, and its full height, in pixels. */
+        val inkAboveBaseline: Float,
+        val inkHeight: Float,
         val contentAspect: Float,
         val dateText: String?,
         /** The date's box this layout was built for; a new one means a new layout. */
