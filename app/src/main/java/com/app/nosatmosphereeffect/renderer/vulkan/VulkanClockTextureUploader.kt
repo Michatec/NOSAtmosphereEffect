@@ -3,7 +3,9 @@ package com.app.nosatmosphereeffect.renderer.vulkan
 import android.content.Context
 import android.graphics.Bitmap
 import android.os.SystemClock
+import com.app.nosatmosphereeffect.helper.ClockFaceBox
 import com.app.nosatmosphereeffect.helper.ClockFaceRenderer
+import com.app.nosatmosphereeffect.helper.ClockPlacement
 import com.app.nosatmosphereeffect.helper.ClockStyle
 
 /**
@@ -39,15 +41,30 @@ internal class VulkanClockTextureUploader(context: Context) {
         get() = face.style
         set(value) { face.style = value }
 
-    var showSeconds: Boolean
-        get() = face.showSeconds
-        set(value) { face.showSeconds = value }
-
-    /** Draws the day and date above the digits. */
+    /** Draws the day and date, wherever its own placement puts it. */
     var showDate: Boolean
         get() = face.showDate
         set(value) { face.showDate = value }
 
+    /** Where the digits sit on screen; the date is placed against them. */
+    var clockPlacement: ClockPlacement
+        get() = face.clockPlacement
+        set(value) { face.clockPlacement = value }
+
+    /** Where the date sits on screen, set and stored like the clock's. */
+    var datePlacement: ClockPlacement
+        get() = face.datePlacement
+        set(value) { face.datePlacement = value }
+
+    /** Width/height of the surface; only the date's placement needs it. */
+    var screenAspect: Float
+        get() = face.screenAspect
+        set(value) { face.screenAspect = value }
+
+    /** Where the digits sit inside the bitmap, for turning the stored
+     *  placement into the rectangle the shader samples. */
+    val faceBox: ClockFaceBox
+        get() = face.faceBox
     var animateDigits: Boolean
         get() = face.animateDigits
         set(value) { face.animateDigits = value }
@@ -81,11 +98,12 @@ internal class VulkanClockTextureUploader(context: Context) {
         return face.render(
             nowMillis = System.currentTimeMillis(),
             uptimeMs = uptime,
-            // The native side now overwrites the bound image in place when
-            // the extent is unchanged (it always is — the face bitmap has a
-            // fixed size), so an animation frame costs a staging copy rather
-            // than an image allocation plus vkDeviceWaitIdle. The remaining
-            // throttle only bounds the per-frame Canvas redraw.
+            // The native side overwrites the bound image in place when the
+            // extent is unchanged, which it is for every frame of an
+            // animation, so those cost a staging copy rather than an image
+            // allocation plus vkDeviceWaitIdle. (Moving the date resizes the
+            // bitmap and does take the slower path, once per change.) The
+            // remaining throttle only bounds the per-frame Canvas redraw.
             minimumIntervalMs = if (face.isEntering(uptime)) {
                 ENTRY_MIN_INTERVAL_MS
             } else {

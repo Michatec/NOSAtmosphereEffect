@@ -35,7 +35,6 @@ data class ClockOverlayState(
      */
     val depthEnabled: Boolean = AtmosphereClockPolicy.DEFAULT_DEPTH,
     val styleId: String = ClockStyle.DEFAULT.id,
-    val showSeconds: Boolean = AtmosphereClockPolicy.DEFAULT_SECONDS,
     val showDate: Boolean = AtmosphereClockPolicy.DEFAULT_DATE,
     val animate: Boolean = AtmosphereClockPolicy.DEFAULT_ANIMATE,
     val centerX: Float = AtmosphereClockPolicy.DEFAULT_CENTER_X,
@@ -47,6 +46,15 @@ data class ClockOverlayState(
      */
     val widthScale: Float = AtmosphereClockPolicy.DEFAULT_WIDTH_SCALE,
     val heightScale: Float = AtmosphereClockPolicy.DEFAULT_HEIGHT_SCALE,
+    /**
+     * The date's own placement, set and stored exactly like the clock's. It
+     * shares the clock's bitmap, so the face converts these into a position
+     * relative to the digits — see [ClockBoxPlacement.relativeDateBox].
+     */
+    val dateCenterX: Float = AtmosphereClockPolicy.DEFAULT_DATE_CENTER_X,
+    val dateTop: Float = AtmosphereClockPolicy.DEFAULT_DATE_TOP,
+    val dateHeight: Float = AtmosphereClockPolicy.DEFAULT_DATE_HEIGHT,
+    val dateWidthScale: Float = AtmosphereClockPolicy.DEFAULT_DATE_WIDTH_SCALE,
     val opacity: Float = AtmosphereClockPolicy.DEFAULT_OPACITY,
     /** The stored preference; may be [ClockPalette.AUTO]. */
     val requestedColor: Int = AtmosphereClockPolicy.DEFAULT_COLOR,
@@ -76,7 +84,20 @@ data class ClockOverlayState(
      * optional binding holds the engine's opaque 1x1 clear texture, which
      * would paint a black rectangle where the clock belongs.
      */
-    val faceUploaded: Boolean = false
+    val faceUploaded: Boolean = false,
+    /**
+     * Vulkan-only, dynamic: where the digits sit inside the face bitmap,
+     * refreshed whenever a fresh face is uploaded. The stored geometry
+     * describes the digits, so turning it into the rectangle the shader
+     * samples needs to know how much bitmap surrounds them — margin for the
+     * animations, plus room for the date wherever it was placed.
+     *
+     * Defaults to "the bitmap is all digits", which is what a face with no
+     * layout yet reports, so a path that never sets it still draws something
+     * sane rather than nothing.
+     */
+    val faceContentTop: Float = 0f,
+    val faceContentHeight: Float = 1f
 ) {
     val style: ClockStyle
         get() = ClockStyle.fromId(styleId)
@@ -95,6 +116,10 @@ data class ClockOverlayState(
             height = AtmosphereClockPolicy.sanitizeHeight(height),
             widthScale = AtmosphereClockPolicy.sanitizeAxisScale(widthScale),
             heightScale = AtmosphereClockPolicy.sanitizeAxisScale(heightScale),
+            dateCenterX = AtmosphereClockPolicy.sanitizeCenterX(dateCenterX),
+            dateTop = AtmosphereClockPolicy.sanitizeTop(dateTop),
+            dateHeight = AtmosphereClockPolicy.sanitizeHeight(dateHeight),
+            dateWidthScale = AtmosphereClockPolicy.sanitizeAxisScale(dateWidthScale),
             opacity = AtmosphereClockPolicy.sanitizeOpacity(opacity),
             requestedColor = AtmosphereClockPolicy.sanitizeColor(requestedColor),
             // A stray AUTO reaching a renderer would draw an opaque black
@@ -109,7 +134,9 @@ data class ClockOverlayState(
             screenId = ClockScreenPolicy.sanitizeScreenId(screenId),
             lockedProgress = lockedProgress.finiteOr(0f),
             unlockedProgress = unlockedProgress.finiteOr(1f),
-            textureAspect = textureAspect.finiteOr(1f).coerceIn(0.05f, 20f)
+            textureAspect = textureAspect.finiteOr(1f).coerceIn(0.05f, 20f),
+            faceContentTop = faceContentTop.finiteOr(0f).coerceIn(0f, 1f),
+            faceContentHeight = faceContentHeight.finiteOr(1f).coerceIn(0.01f, 1f)
         )
     }
 
@@ -148,26 +175,52 @@ data class ClockOverlayState(
      * these two numbers together anyway.
      */
     val renderHeight: Float
+        get() = contentHeight / faceContentHeight.coerceIn(0.01f, 1f)
+
+    /** The digits' own height on screen: what the user dragged. */
+    val contentHeight: Float
         get() = height * heightScale
+
+    /**
+     * The digits' own top edge. [top] is the top at the *unstretched* size,
+     * because that is what the drag gesture sets; growing [heightScale] from
+     * there would extend the box downwards only.
+     */
+    val contentTop: Float
+        get() = top + (height - contentHeight) / 2f
+
+    /** The clock's placement, ready for [ClockBoxPlacement]. */
+    val placement: ClockPlacement
+        get() = ClockPlacement(
+            centerX = centerX,
+            top = contentTop,
+            height = contentHeight,
+            widthScale = widthScale
+        )
+
+    /** The date's placement, ready for [ClockBoxPlacement]. */
+    val datePlacement: ClockPlacement
+        get() = ClockPlacement(
+            centerX = dateCenterX,
+            top = dateTop,
+            height = dateHeight,
+            widthScale = dateWidthScale
+        )
 
     /** True when the face should be drawn as refracting glass. */
     val liquidGlass: Boolean
         get() = style.liquidGlass
 
     /**
-     * The top edge the renderers should actually use.
+     * The face texture's top edge — where the renderers place the bitmap.
      *
-     * [top] is the top of the box at the *unstretched* size, because that is
-     * what the drag gesture on the calibration screen sets. Growing
-     * [heightScale] from there would extend the box downwards only, so the
-     * clock would visibly sink as the height slider went up — which is
-     * exactly what it did before this existed. Re-centring means the height
-     * slider changes the shape and nothing else.
+     * The stored geometry describes the digits, and the bitmap extends above
+     * them by [faceContentTop] of its own height, so the texture starts that
+     * much higher. Keeping the two apart is what stops a face's animation
+     * margin, or the date being dragged somewhere new, from moving the clock.
      */
     val renderTop: Float
-        // Re-centred rather than anchored at the top edge, so raising the
-        // height slider grows the clock both ways instead of sinking it.
-        get() = top + (height - renderHeight) / 2f
+        get() = contentTop - faceContentTop.coerceIn(0f, 1f) * renderHeight
 
     /**
      * The texture aspect the renderers should actually use, given the face

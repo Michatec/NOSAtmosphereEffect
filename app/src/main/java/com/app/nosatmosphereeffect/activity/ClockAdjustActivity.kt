@@ -88,6 +88,7 @@ import com.app.nosatmosphereeffect.helper.ClockBoxPlacement
 import com.app.nosatmosphereeffect.helper.ClockBoxRect
 import com.app.nosatmosphereeffect.helper.ClockFaceBox
 import com.app.nosatmosphereeffect.helper.ClockPlacement
+import com.app.nosatmosphereeffect.helper.ClockPreferences
 import com.app.nosatmosphereeffect.helper.ClockFaceRenderer
 import android.os.SystemClock
 import androidx.compose.runtime.DisposableEffect
@@ -143,43 +144,52 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
         context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
     }
 
-    var centerX by remember {
+    // Through the shared reader, which converts a placement stored before the
+    // stored geometry came to mean the digits themselves.
+    val storedPlacement = remember(prefs) { ClockPreferences.readPlacement(prefs) }
+    var centerX by remember { mutableFloatStateOf(storedPlacement.centerX) }
+    var top by remember { mutableFloatStateOf(storedPlacement.top) }
+    var heightFraction by remember { mutableFloatStateOf(storedPlacement.height) }
+    var widthScale by remember { mutableFloatStateOf(storedPlacement.widthScale) }
+    var dateCenterX by remember {
         mutableFloatStateOf(
             prefs.getFloat(
-                AtmosphereClockPolicy.CENTER_X_KEY,
-                AtmosphereClockPolicy.DEFAULT_CENTER_X
+                AtmosphereClockPolicy.DATE_CENTER_X_KEY,
+                AtmosphereClockPolicy.DEFAULT_DATE_CENTER_X
             )
         )
     }
-    var top by remember {
-        mutableFloatStateOf(
-            prefs.getFloat(AtmosphereClockPolicy.TOP_KEY, AtmosphereClockPolicy.DEFAULT_TOP)
-        )
-    }
-    var heightFraction by remember {
+    var dateTop by remember {
         mutableFloatStateOf(
             prefs.getFloat(
-                AtmosphereClockPolicy.HEIGHT_KEY,
-                AtmosphereClockPolicy.DEFAULT_HEIGHT
+                AtmosphereClockPolicy.DATE_TOP_KEY,
+                AtmosphereClockPolicy.DEFAULT_DATE_TOP
             )
         )
     }
-    var widthScale by remember {
+    var dateHeightFraction by remember {
         mutableFloatStateOf(
             prefs.getFloat(
-                AtmosphereClockPolicy.WIDTH_SCALE_KEY,
-                AtmosphereClockPolicy.DEFAULT_WIDTH_SCALE
+                AtmosphereClockPolicy.DATE_HEIGHT_KEY,
+                AtmosphereClockPolicy.DEFAULT_DATE_HEIGHT
             )
         )
     }
-    var heightScale by remember {
+    var dateWidthScale by remember {
         mutableFloatStateOf(
             prefs.getFloat(
-                AtmosphereClockPolicy.HEIGHT_SCALE_KEY,
-                AtmosphereClockPolicy.DEFAULT_HEIGHT_SCALE
+                AtmosphereClockPolicy.DATE_WIDTH_SCALE_KEY,
+                AtmosphereClockPolicy.DEFAULT_DATE_WIDTH_SCALE
             )
         )
     }
+    /** Which box the drags are for. The other one is drawn, but passive. */
+    var editingDate by remember { mutableStateOf(false) }
+    // Always 1 from here on: ClockPreferences.readPlacement has already folded
+    // any stored vertical stretch into the placement above, and the box is the
+    // only size control now. Kept as state purely so persist() writes the
+    // neutral value back over anything the old sliders left behind.
+    val heightScale = AtmosphereClockPolicy.DEFAULT_HEIGHT_SCALE
     var opacity by remember {
         mutableFloatStateOf(
             prefs.getFloat(
@@ -191,14 +201,6 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
     var style by remember {
         mutableStateOf(
             ClockStyle.fromId(prefs.getString(AtmosphereClockPolicy.STYLE_KEY, null))
-        )
-    }
-    var showSeconds by remember {
-        mutableStateOf(
-            prefs.getBoolean(
-                AtmosphereClockPolicy.SECONDS_KEY,
-                AtmosphereClockPolicy.DEFAULT_SECONDS
-            )
         )
     }
     var showDate by remember {
@@ -241,17 +243,6 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
     var interacting by remember { mutableStateOf(false) }
     var lastInteractionMs by remember { mutableStateOf(0L) }
 
-    // The stored width/height stretch is folded into one box the moment this
-    // screen opens: from here on the box IS the size, so there is exactly one
-    // representation on screen and one in preferences.
-    LaunchedEffect(Unit) {
-        if (heightScale != 1f && heightScale > 0f) {
-            heightFraction = AtmosphereClockPolicy.sanitizeHeight(heightFraction * heightScale)
-            widthScale = AtmosphereClockPolicy.sanitizeAxisScale(widthScale / heightScale)
-            heightScale = 1f
-        }
-    }
-
     var wallpaperBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var wallpaperLoadFinished by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
@@ -276,9 +267,9 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
     }
 
     var thumbnails by remember { mutableStateOf<Map<ClockStyle, ImageBitmap>>(emptyMap()) }
-    LaunchedEffect(showSeconds, showDate, hourFormat) {
+    LaunchedEffect(hourFormat) {
         thumbnails = withContext(Dispatchers.Default) {
-            renderStyleThumbnails(context, showSeconds, showDate, hourFormat)
+            renderStyleThumbnails(context, hourFormat)
         }
     }
 
@@ -287,8 +278,11 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
         top = AtmosphereClockPolicy.sanitizeTop(top)
         heightFraction = AtmosphereClockPolicy.sanitizeHeight(heightFraction)
         widthScale = AtmosphereClockPolicy.sanitizeAxisScale(widthScale)
-        heightScale = AtmosphereClockPolicy.sanitizeAxisScale(heightScale)
         opacity = AtmosphereClockPolicy.sanitizeOpacity(opacity)
+        dateCenterX = AtmosphereClockPolicy.sanitizeCenterX(dateCenterX)
+        dateTop = AtmosphereClockPolicy.sanitizeTop(dateTop)
+        dateHeightFraction = AtmosphereClockPolicy.sanitizeHeight(dateHeightFraction)
+        dateWidthScale = AtmosphereClockPolicy.sanitizeAxisScale(dateWidthScale)
         prefs.edit {
             putFloat(AtmosphereClockPolicy.CENTER_X_KEY, centerX)
             putFloat(AtmosphereClockPolicy.TOP_KEY, top)
@@ -296,8 +290,17 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
             putFloat(AtmosphereClockPolicy.WIDTH_SCALE_KEY, widthScale)
             putFloat(AtmosphereClockPolicy.HEIGHT_SCALE_KEY, heightScale)
             putFloat(AtmosphereClockPolicy.OPACITY_KEY, opacity)
+            putFloat(AtmosphereClockPolicy.DATE_CENTER_X_KEY, dateCenterX)
+            putFloat(AtmosphereClockPolicy.DATE_TOP_KEY, dateTop)
+            putFloat(AtmosphereClockPolicy.DATE_HEIGHT_KEY, dateHeightFraction)
+            putFloat(AtmosphereClockPolicy.DATE_WIDTH_SCALE_KEY, dateWidthScale)
+            // Stamped alongside the geometry it describes: anything written
+            // here is already in the current form.
+            putInt(
+                AtmosphereClockPolicy.GEOMETRY_VERSION_KEY,
+                AtmosphereClockPolicy.GEOMETRY_VERSION
+            )
             putString(AtmosphereClockPolicy.STYLE_KEY, style.id)
-            putBoolean(AtmosphereClockPolicy.SECONDS_KEY, showSeconds)
             putBoolean(AtmosphereClockPolicy.DATE_KEY, showDate)
             putBoolean(AtmosphereClockPolicy.ANIMATE_KEY, animate)
             putInt(
@@ -313,7 +316,8 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
 
     LaunchedEffect(
         centerX, top, heightFraction, widthScale, heightScale, opacity, style,
-        showSeconds, showDate, animate, colorPref, hourFormat
+        showDate, dateCenterX, dateTop, dateHeightFraction, dateWidthScale,
+        animate, colorPref, hourFormat
     ) {
         delay(350)
         persist()
@@ -340,14 +344,13 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
     val faceRenderer = remember { ClockFaceRenderer(context) }
     var faceBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var faceRevision by remember { mutableIntStateOf(0) }
-    var faceAspect by remember { mutableFloatStateOf(1f) }
     // Where the digits sit inside the face texture. The texture carries margin
-    // for the digit animation, so the box the user drags is this content area
-    // rather than the whole texture — otherwise the frame would float well
-    // clear of the digits it is supposed to be sizing.
-    var faceContent by remember {
-        mutableStateOf(ClockFaceBox(aspect = 1f, left = 0f, top = 0f, right = 1f, bottom = 1f))
-    }
+    // for the digit animation and, when the date is on, room for the date
+    // wherever it was placed — so the box the user drags is this content area
+    // rather than the whole texture.
+    var faceContent by remember { mutableStateOf(ClockFaceBox.IDENTITY) }
+    /** The date line's natural width/height ratio, for sizing its box. */
+    var dateAspect by remember { mutableFloatStateOf(DEFAULT_DATE_ASPECT) }
     DisposableEffect(faceRenderer) {
         onDispose { faceRenderer.release() }
     }
@@ -360,32 +363,58 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
         height = heightFraction,
         widthScale = widthScale
     )
-    // Two rectangles: the face texture, which is what the shaders place, and
-    // the digits inside it, which is what the user sees and drags.
-    val textureBox = ClockBoxPlacement.textureBox(placement, faceAspect, screenAspect)
+    val datePlacement = ClockPlacement(
+        centerX = dateCenterX,
+        top = dateTop,
+        height = dateHeightFraction,
+        widthScale = dateWidthScale
+    )
+    // Three rectangles: the face texture, which is what the shaders place, and
+    // the digits and the date inside it, which are what the user sees and
+    // drags. The stored geometry describes the last two.
+    val textureBox = ClockBoxPlacement.textureBox(placement, faceContent, screenAspect)
     val contentBox =
-        ClockBoxPlacement.contentBox(placement, faceAspect, faceContent, screenAspect)
+        ClockBoxPlacement.contentBox(placement, faceContent.contentAspect, screenAspect)
+    val dateBox = ClockBoxPlacement.contentBox(datePlacement, dateAspect, screenAspect)
+    val activeBox = if (editingDate && showDate) dateBox else contentBox
+    val activePlacement = if (editingDate && showDate) datePlacement else placement
 
     // One coroutine owns the renderer, keyed on the settings that change the
-    // face itself. Moving or resizing the box is not one of them: the box is
-    // shader geometry, so a drag neither redraws nor re-uploads the digits.
-    LaunchedEffect(style, showSeconds, showDate, animate, resolvedColor, hourFormat) {
-        val measured = withContext(Dispatchers.Default) {
-            faceRenderer.style = style
-            faceRenderer.showSeconds = showSeconds
-            faceRenderer.showDate = showDate
-            faceRenderer.animateDigits = animate
-            faceRenderer.animateEntry = false
-            faceRenderer.color = resolvedColor
-            faceRenderer.hourFormatOverride =
-                AtmosphereClockPolicy.hourFormatOverride(hourFormat)
-            runCatching { faceRenderer.measureFace(System.currentTimeMillis()) }.getOrNull()
-        }
-        if (measured != null) {
-            faceAspect = measured.aspect
-            faceContent = measured
-        }
+    // face itself. The clock's own box is not one of them — that is shader
+    // geometry, so moving the clock neither redraws nor re-uploads the digits
+    // — but the date lives inside the same bitmap, so a date drag does have to
+    // redraw it. The loop reads the current placement on each pass rather than
+    // being keyed on it: keying would restart the whole coroutine on every
+    // frame of a drag.
+    LaunchedEffect(style, showDate, animate, resolvedColor, hourFormat) {
+        var lastGeometry: Pair<ClockPlacement, ClockPlacement>? = null
         while (true) {
+            val wantedClock = ClockPlacement(centerX, top, heightFraction, widthScale)
+            val wantedDate =
+                ClockPlacement(dateCenterX, dateTop, dateHeightFraction, dateWidthScale)
+            val geometry = wantedClock to wantedDate
+            val geometryChanged = lastGeometry != geometry
+            lastGeometry = geometry
+            val measured = withContext(Dispatchers.Default) {
+                faceRenderer.style = style
+                faceRenderer.showDate = showDate
+                faceRenderer.animateDigits = animate
+                faceRenderer.animateEntry = false
+                faceRenderer.color = resolvedColor
+                faceRenderer.hourFormatOverride =
+                    AtmosphereClockPolicy.hourFormatOverride(hourFormat)
+                faceRenderer.screenAspect = screenAspect
+                faceRenderer.clockPlacement = wantedClock
+                faceRenderer.datePlacement = wantedDate
+                runCatching {
+                    val now = System.currentTimeMillis()
+                    faceRenderer.measureFace(now) to faceRenderer.measureDateAspect(now)
+                }.getOrNull()
+            }
+            if (measured != null) {
+                faceContent = measured.first
+                measured.second?.let { dateAspect = it }
+            }
             val snapshot = withContext(Dispatchers.Default) {
                 runCatching {
                     // Handed over as a copy: the renderer keeps reusing its
@@ -402,7 +431,11 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
                 faceRevision++
             }
             val animating = faceRenderer.isAnimating(SystemClock.uptimeMillis())
-            delay(if (showSeconds || animating) 120L else 1_000L)
+            // Redrawing the whole face costs a bitmap, so a drag gets ten
+            // frames a second rather than sixty: the frame the finger is
+            // holding follows at full rate, and the date inside it catches up
+            // imperceptibly behind. Nothing else here changes between minutes.
+            delay(if (animating || interacting || geometryChanged) 100L else 1_000L)
         }
     }
 
@@ -414,26 +447,32 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
     fun applyBox(proposed: ClockBoxRect, handle: ClockBoxHandle) {
         interacting = true
         lastInteractionMs = System.currentTimeMillis()
-        val origin = dragStart ?: placement
+        val editing = editingDate && showDate
+        val origin = dragStart ?: activePlacement
         val settled = ClockBoxPlacement.apply(
             start = origin,
             proposed = proposed,
             handle = handle,
-            faceAspect = faceAspect,
-            content = faceContent,
+            contentAspect = if (editing) dateAspect else faceContent.contentAspect,
             screenAspect = screenAspect
         )
         if (handle == ClockBoxHandle.MOVE &&
             ClockBoxPlacement.isCentred(settled) &&
-            !ClockBoxPlacement.isCentred(placement)
+            !ClockBoxPlacement.isCentred(activePlacement)
         ) {
             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
         }
-        centerX = settled.centerX
-        top = settled.top
-        heightFraction = settled.height
-        widthScale = settled.widthScale
-        heightScale = 1f
+        if (editing) {
+            dateCenterX = settled.centerX
+            dateTop = settled.top
+            dateHeightFraction = settled.height
+            dateWidthScale = settled.widthScale
+        } else {
+            centerX = settled.centerX
+            top = settled.top
+            heightFraction = settled.height
+            widthScale = settled.widthScale
+        }
     }
 
     Box(
@@ -448,6 +487,10 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
                 face = faceBitmap,
                 box = textureBox,
                 opacity = opacity,
+                // The segment faces are solid, not glass: drawing them through
+                // the refraction would show a preview of a clock the wallpaper
+                // is not going to draw.
+                glass = style.liquidGlass,
                 faceRevision = faceRevision,
                 modifier = Modifier.fillMaxSize()
             )
@@ -459,12 +502,19 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
 
         if (containerWidthPx > 0f && containerHeightPx > 0f) {
             ClockBoxOverlay(
-                box = contentBox,
-                centered = ClockBoxPlacement.isCentred(placement),
+                box = activeBox,
+                // Drawn but not draggable, so both are visible while either is
+                // being placed.
+                passiveBox = if (showDate) {
+                    if (editingDate) contentBox else dateBox
+                } else {
+                    null
+                },
+                centered = ClockBoxPlacement.isCentred(activePlacement),
                 showHandles = !eyedropperArmed,
                 onBoxChange = ::applyBox,
                 onDragStarted = {
-                    dragStart = placement
+                    dragStart = activePlacement
                     interacting = true
                     lastInteractionMs = System.currentTimeMillis()
                 },
@@ -474,7 +524,23 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
                 },
                 onTap = { position ->
                     val source = wallpaperBitmap
-                    if (eyedropperArmed && source != null) {
+                    val other = if (showDate) {
+                        if (editingDate) contentBox else dateBox
+                    } else {
+                        null
+                    }
+                    if (other != null &&
+                        !eyedropperArmed &&
+                        containerWidthPx > 0f &&
+                        other.contains(
+                            position.x / containerWidthPx,
+                            position.y / containerHeightPx
+                        )
+                    ) {
+                        // Tapping the box you are not editing selects it,
+                        // which is quicker than going back to the chips.
+                        editingDate = !editingDate
+                    } else if (eyedropperArmed && source != null) {
                         val sampled = sampleWallpaperColor(
                             bitmap = source,
                             tap = position,
@@ -519,10 +585,12 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
                     )
                 }
                 Text(
-                    if (eyedropperArmed) {
-                        "Tap the wallpaper to pick a colour"
-                    } else {
-                        "Drag the box to move · corners resize · tap to hide"
+                    when {
+                        eyedropperArmed -> "Tap the wallpaper to pick a colour"
+                        showDate ->
+                            "Dragging the ${if (editingDate) "date" else "clock"} · " +
+                                "tap the other box to switch"
+                        else -> "Drag the box to move · corners resize · tap to hide"
                     },
                     color = Color.White,
                     style = MaterialTheme.typography.bodyMedium,
@@ -543,10 +611,15 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
                 onStyleSelected = { style = it },
                 opacity = opacity,
                 onOpacityChange = { opacity = AtmosphereClockPolicy.sanitizeOpacity(it) },
-                showSeconds = showSeconds,
-                onShowSecondsChange = { showSeconds = it },
                 showDate = showDate,
-                onShowDateChange = { showDate = it },
+                onShowDateChange = {
+                    showDate = it
+                    // Nothing to adjust once it is off, and the box the user
+                    // was dragging would vanish under their finger.
+                    if (!it) editingDate = false
+                },
+                editingDate = editingDate,
+                onEditingDateChange = { editingDate = it },
                 animate = animate,
                 onAnimateChange = { animate = it },
                 hourFormat = hourFormat,
@@ -567,8 +640,11 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
                     top = AtmosphereClockPolicy.DEFAULT_TOP
                     heightFraction = AtmosphereClockPolicy.DEFAULT_HEIGHT
                     widthScale = AtmosphereClockPolicy.DEFAULT_WIDTH_SCALE
-                    heightScale = AtmosphereClockPolicy.DEFAULT_HEIGHT_SCALE
                     opacity = AtmosphereClockPolicy.DEFAULT_OPACITY
+                    dateCenterX = AtmosphereClockPolicy.DEFAULT_DATE_CENTER_X
+                    dateTop = AtmosphereClockPolicy.DEFAULT_DATE_TOP
+                    dateHeightFraction = AtmosphereClockPolicy.DEFAULT_DATE_HEIGHT
+                    dateWidthScale = AtmosphereClockPolicy.DEFAULT_DATE_WIDTH_SCALE
                 }
             )
         }
@@ -582,10 +658,10 @@ private fun ClockControls(
     onStyleSelected: (ClockStyle) -> Unit,
     opacity: Float,
     onOpacityChange: (Float) -> Unit,
-    showSeconds: Boolean,
-    onShowSecondsChange: (Boolean) -> Unit,
     showDate: Boolean,
     onShowDateChange: (Boolean) -> Unit,
+    editingDate: Boolean,
+    onEditingDateChange: (Boolean) -> Unit,
     animate: Boolean,
     onAnimateChange: (Boolean) -> Unit,
     hourFormat: String,
@@ -613,6 +689,26 @@ private fun ClockControls(
             .windowInsetsPadding(WindowInsets.navigationBars)
             .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
+        if (showDate) {
+            // The date has its own box, so something has to say which box the
+            // drags are for.
+            SectionLabel("Adjusting")
+            Spacer(Modifier.height(6.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ChoiceChip(
+                    label = "Clock",
+                    selected = !editingDate,
+                    onClick = { onEditingDateChange(false) }
+                )
+                ChoiceChip(
+                    label = "Date",
+                    selected = editingDate,
+                    onClick = { onEditingDateChange(true) }
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+        }
+
         SectionLabel("Style")
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -630,10 +726,11 @@ private fun ClockControls(
 
         Spacer(Modifier.height(12.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            // "Tint", not "Colour": glass takes its brightness from the
-            // wallpaper showing through it, and the chosen colour tints that
-            // rather than filling the digits with a flat colour.
-            SectionLabel("Glass tint")
+            // "Tint", not "Colour": on a glass face the brightness comes
+            // from the wallpaper showing through, and the chosen colour tints
+            // that rather than filling the digits with a flat colour. The
+            // solid faces do take it as their colour.
+            SectionLabel(if (selected.liquidGlass) "Glass tint" else "Colour")
             Spacer(Modifier.width(8.dp))
             AtmoTextButton(
                 text = if (pickerOpen) "Close wheel" else "Colour wheel",
@@ -709,15 +806,10 @@ private fun ClockControls(
         }
 
         SettingSwitchRow(
-            title = "Show seconds",
-            checked = showSeconds,
-            onCheckedChange = onShowSecondsChange
-        )
-        SettingSwitchRow(
             title = "Show date",
             checked = showDate,
             onCheckedChange = onShowDateChange,
-            subtitle = "Puts the day and date above the clock."
+            subtitle = "Adds the day and date, in the same style as the clock."
         )
         SettingSwitchRow(
             title = "Animate digit changes",
@@ -1049,8 +1141,6 @@ private fun sampleWallpaperColor(
 
 private fun renderStyleThumbnails(
     context: Context,
-    showSeconds: Boolean,
-    showDate: Boolean,
     hourFormat: String
 ): Map<ClockStyle, ImageBitmap> {
     val now = System.currentTimeMillis()
@@ -1058,8 +1148,9 @@ private fun renderStyleThumbnails(
     for (candidate in ClockStyle.entries) {
         val renderer = ClockFaceRenderer(context).apply {
             style = candidate
-            this.showSeconds = showSeconds
-            this.showDate = showDate
+            // Digits only: these pick a face, and a date placed off to one
+            // side would make the thumbnail mostly empty bitmap.
+            showDate = false
             animateDigits = false
             hourFormatOverride = AtmosphereClockPolicy.hourFormatOverride(hourFormat)
         }
@@ -1083,6 +1174,9 @@ private fun renderStyleThumbnails(
     }
     return result
 }
+
+/** Stands in for the date's real ratio until the face has been measured. */
+private const val DEFAULT_DATE_ASPECT = 5.5f
 
 private suspend fun loadCurrentWallpaperBitmap(context: Context): Bitmap? {
     val file = File(context.filesDir, "wallpaper.jpg")

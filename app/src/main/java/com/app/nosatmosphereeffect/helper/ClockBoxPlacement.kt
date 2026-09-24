@@ -2,7 +2,7 @@ package com.app.nosatmosphereeffect.helper
 
 import kotlin.math.abs
 
-/** Which part of the clock's box a drag grabbed. */
+/** Which part of a box a drag grabbed. */
 enum class ClockBoxHandle {
     MOVE,
     TOP_LEFT,
@@ -31,9 +31,30 @@ data class ClockBoxRect(
     val width: Float get() = right - left
     val height: Float get() = bottom - top
     val centerX: Float get() = (left + right) / 2f
+
+    fun contains(x: Float, y: Float): Boolean =
+        x >= left && x <= right && y >= top && y <= bottom
 }
 
-/** The clock's stored placement. */
+/**
+ * A stored placement: where something sits on screen and how big it is.
+ *
+ * [height] is a fraction of the screen's height and [top] the fraction it
+ * starts at, both measured on the thing the user actually sees — the digits,
+ * or the date — rather than on the bitmap they are drawn into. [widthScale]
+ * is 1 at natural proportions.
+ *
+ * ## Why this describes the content rather than the texture
+ *
+ * It used to hold the face texture's rectangle, and the digits' box was
+ * derived from it. That coupled the clock's position to the bitmap's padding:
+ * the same stored numbers drew the clock somewhere slightly different on a
+ * face with a different margin, and once the date became freely placeable —
+ * which changes the bitmap's size and shape — it would have moved the clock
+ * every time the date was dragged. Storing what the user sees means the
+ * digits stay exactly where they were put, whatever the face does around
+ * them, and the texture rectangle is worked out per frame instead.
+ */
 data class ClockPlacement(
     val centerX: Float,
     val top: Float,
@@ -46,12 +67,12 @@ data class ClockPlacement(
  *
  * ## Why this is a pure object with tests
  *
- * Two rectangles are in play — the face texture (what is stored and what the
- * shaders place) and the digits inside it (what the user sees and drags) — and
- * the conversion runs both ways on every frame of a gesture. Doing that inline
- * in the calibration screen produced a resize that also nudged the clock and a
- * move that reset its size, neither of which is visible in a code review of
- * the screen. Here each rule is one function and each one has a test.
+ * Two rectangles are in play — what the user drags and what the shaders
+ * sample — and the conversion runs both ways on every frame of a gesture.
+ * Doing that inline in the calibration screen produced a resize that also
+ * nudged the clock and a move that reset its size, neither of which is
+ * visible in a code review of the screen. Here each rule is one function and
+ * each one has a test.
  *
  * Every gesture is resolved against the placement as it was when the finger
  * went down, so a drag cannot accumulate rounding drift or react to its own
@@ -62,15 +83,21 @@ object ClockBoxPlacement {
     /** Snap to the screen centre within this fraction while moving. */
     const val CENTRE_SNAP = 0.015f
 
-    /** The whole face texture, in screen fractions. */
-    fun textureBox(
+    /**
+     * The box the user sees and drags.
+     *
+     * [contentAspect] is the drawn content's own width/height ratio in pixels
+     * — [ClockFaceBox.contentAspect] for the digits, the date line's natural
+     * ratio for the date.
+     */
+    fun contentBox(
         placement: ClockPlacement,
-        faceAspect: Float,
+        contentAspect: Float,
         screenAspect: Float
     ): ClockBoxRect {
         val height = placement.height
-        val width = if (screenAspect > 0f && faceAspect > 0f) {
-            height * faceAspect * placement.widthScale / screenAspect
+        val width = if (screenAspect > 0f && contentAspect > 0f) {
+            height * contentAspect * placement.widthScale / screenAspect
         } else {
             height
         }
@@ -83,79 +110,71 @@ object ClockBoxPlacement {
     }
 
     /**
-     * The digits' own frame: what the calibration screen draws and drags. The
-     * texture carries margin for the digit animation, so the two differ.
+     * The whole face texture, in screen fractions: what the renderers hand
+     * the shader. Larger than [contentBox] — the bitmap carries margin for
+     * the digit animations and room for the date wherever it was placed — and
+     * positioned so the digits land exactly on their own box.
      */
-    fun contentBox(
+    fun textureBox(
         placement: ClockPlacement,
-        faceAspect: Float,
-        content: ClockFaceBox,
+        face: ClockFaceBox,
         screenAspect: Float
     ): ClockBoxRect {
-        val texture = textureBox(placement, faceAspect, screenAspect)
+        val content = contentBox(placement, face.contentAspect, screenAspect)
+        val textureWidth = content.width / face.widthFraction
+        val textureHeight = content.height / face.heightFraction
+        val left = content.left - face.left * textureWidth
+        val top = content.top - face.top * textureHeight
         return ClockBoxRect(
-            left = texture.left + content.left * texture.width,
-            top = texture.top + content.top * texture.height,
-            right = texture.left + content.right * texture.width,
-            bottom = texture.top + content.bottom * texture.height
+            left = left,
+            top = top,
+            right = left + textureWidth,
+            bottom = top + textureHeight
         )
     }
 
     /**
-     * The placement after dragging [handle] so the digits' frame becomes
-     * [proposed], starting from [start].
+     * The placement after dragging [handle] so the box becomes [proposed],
+     * starting from [start].
      *
      * The side opposite the handle stays exactly where it was, a move keeps
-     * the size to the float, and a resize never moves the clock sideways
-     * unless the handle itself is horizontal.
+     * the size to the float, and a resize never moves the box sideways unless
+     * the handle itself is horizontal.
      */
     fun apply(
         start: ClockPlacement,
         proposed: ClockBoxRect,
         handle: ClockBoxHandle,
-        faceAspect: Float,
-        content: ClockFaceBox,
+        contentAspect: Float,
         screenAspect: Float
     ): ClockPlacement {
-        if (screenAspect <= 0f || faceAspect <= 0f) return start
-        val startContent = contentBox(start, faceAspect, content, screenAspect)
-        val contentWidthFraction = (content.right - content.left).coerceIn(0.05f, 1f)
-        val contentHeightFraction = (content.bottom - content.top).coerceIn(0.05f, 1f)
-
-        val wantedContentHeight =
-            if (handle.resizesHeight) proposed.height else startContent.height
-        val wantedContentWidth =
-            if (handle.resizesWidth) proposed.width else startContent.width
+        if (screenAspect <= 0f || contentAspect <= 0f) return start
+        val startBox = contentBox(start, contentAspect, screenAspect)
 
         // A move must not touch the size at all, so it keeps the stored
-        // numbers rather than reconstructing them from the box.
-        val requestedHeight = if (handle.resizesHeight) {
-            AtmosphereClockPolicy.sanitizeHeight(wantedContentHeight / contentHeightFraction)
+        // numbers rather than reconstructing them from the box. The content
+        // may fill the screen but not leave it, so the height stops there.
+        val height = if (handle.resizesHeight) {
+            AtmosphereClockPolicy.sanitizeHeight(proposed.height).coerceAtMost(1f)
         } else {
             start.height
         }
-        // The digits may fill the screen but not leave it, so the height is
-        // capped where the digits reach the screen's full height.
-        val height = requestedHeight.coerceAtMost(1f / contentHeightFraction)
 
-        val requestedWidthScale = if (handle.resizesWidth) {
-            AtmosphereClockPolicy.sanitizeAxisScale(
-                (wantedContentWidth / contentWidthFraction) * screenAspect /
-                    (height * faceAspect)
+        val requestedWidthScale = when {
+            handle.resizesWidth -> AtmosphereClockPolicy.sanitizeAxisScale(
+                proposed.width * screenAspect / (height * contentAspect)
             )
-        } else if (handle.resizesHeight) {
             // A vertical-only resize keeps the shape: the stored width scale
             // is relative to the height, so it needs rescaling to hold the
-            // digits' width steady.
-            AtmosphereClockPolicy.sanitizeAxisScale(
+            // width steady.
+            handle.resizesHeight -> AtmosphereClockPolicy.sanitizeAxisScale(
                 start.widthScale * start.height / height
             )
-        } else {
-            start.widthScale
+            else -> start.widthScale
         }
-        // The same cap across: a clock wider than the screen could not be
+        // The same limit across: something wider than the screen could not be
         // placed without part of it hanging off the side.
-        val maxWidthScale = screenAspect / (height * faceAspect * contentWidthFraction)
+        val maxWidthScale = screenAspect / (height * contentAspect)
         val widthScale = requestedWidthScale.coerceAtMost(maxWidthScale)
 
         val settled = ClockPlacement(
@@ -164,45 +183,40 @@ object ClockBoxPlacement {
             height = height,
             widthScale = widthScale
         )
-        val settledContent = contentBox(settled, faceAspect, content, screenAspect)
+        val box = contentBox(settled, contentAspect, screenAspect)
 
-        val contentLeft = when (handle) {
+        val left = when (handle) {
             ClockBoxHandle.MOVE -> proposed.left
             ClockBoxHandle.TOP_LEFT, ClockBoxHandle.BOTTOM_LEFT, ClockBoxHandle.LEFT ->
-                startContent.right - settledContent.width
+                startBox.right - box.width
             ClockBoxHandle.TOP_RIGHT, ClockBoxHandle.BOTTOM_RIGHT, ClockBoxHandle.RIGHT ->
-                startContent.left
-            // Vertical-only handles keep the clock centred where it was.
-            else -> startContent.centerX - settledContent.width / 2f
+                startBox.left
+            // Vertical-only handles keep it centred where it was.
+            else -> startBox.centerX - box.width / 2f
         }
-        val contentTop = when (handle) {
+        val top = when (handle) {
             ClockBoxHandle.MOVE -> proposed.top
             ClockBoxHandle.TOP_LEFT, ClockBoxHandle.TOP_RIGHT, ClockBoxHandle.TOP ->
-                startContent.bottom - settledContent.height
-            else -> startContent.top
+                startBox.bottom - box.height
+            else -> startBox.top
         }
 
-        // The only placement rule: the digits stay on screen. Within that the
-        // clock goes anywhere at any size — including hard against an edge,
-        // which the old texture-space limits made impossible for a tall clock.
-        val clampedLeft = contentLeft.coerceIn(
-            minOf(0f, 1f - settledContent.width),
-            maxOf(0f, 1f - settledContent.width)
+        // The only placement rule: it stays on screen. Within that it goes
+        // anywhere at any size — including hard against an edge, which the old
+        // texture-space limits made impossible for a tall clock.
+        val clampedLeft = left.coerceIn(
+            minOf(0f, 1f - box.width),
+            maxOf(0f, 1f - box.width)
         )
-        val clampedTop = contentTop.coerceIn(
-            minOf(0f, 1f - settledContent.height),
-            maxOf(0f, 1f - settledContent.height)
+        val clampedTop = top.coerceIn(
+            minOf(0f, 1f - box.height),
+            maxOf(0f, 1f - box.height)
         )
-
-        // Back out to the texture rectangle, which is what gets stored.
-        val textureWidth = settledContent.width / contentWidthFraction
-        val textureHeight = settledContent.height / contentHeightFraction
-        val centerX = clampedLeft - content.left * textureWidth + textureWidth / 2f
-        val top = clampedTop - content.top * textureHeight
+        val centerX = clampedLeft + box.width / 2f
 
         return ClockPlacement(
             centerX = AtmosphereClockPolicy.sanitizeCenterX(
-                // Only a move snaps: snapping mid-resize would slide the clock
+                // Only a move snaps: snapping mid-resize would slide it
                 // sideways while the user is only changing its size.
                 if (handle == ClockBoxHandle.MOVE && abs(centerX - 0.5f) < CENTRE_SNAP) {
                     0.5f
@@ -210,9 +224,39 @@ object ClockBoxPlacement {
                     centerX
                 }
             ),
-            top = AtmosphereClockPolicy.sanitizeTop(top),
+            top = AtmosphereClockPolicy.sanitizeTop(clampedTop),
             height = height,
             widthScale = widthScale
+        )
+    }
+
+    /**
+     * Where the date sits relative to the digits, which is how the face
+     * bitmap has to be told about it — see [ClockDateLayout].
+     *
+     * [contentAspect] is the digits' pixel ratio and [dateAspect] the date
+     * line's; both boxes are built the same way the user dragged them, so the
+     * result is exactly what the calibration screen showed.
+     */
+    fun relativeDateBox(
+        clock: ClockPlacement,
+        date: ClockPlacement,
+        contentAspect: Float,
+        dateAspect: Float,
+        screenAspect: Float
+    ): ClockDateLayout {
+        val clockBox = contentBox(clock, contentAspect, screenAspect)
+        val dateBox = contentBox(date, dateAspect, screenAspect)
+        val width = clockBox.width
+        val height = clockBox.height
+        if (width <= 1e-5f || height <= 1e-5f) {
+            return ClockDateLayout(offsetX = 0f, offsetY = -0.4f, width = 1f, height = 0.2f)
+        }
+        return ClockDateLayout(
+            offsetX = (dateBox.left - clockBox.left) / width,
+            offsetY = (dateBox.top - clockBox.top) / height,
+            width = dateBox.width / width,
+            height = dateBox.height / height
         )
     }
 

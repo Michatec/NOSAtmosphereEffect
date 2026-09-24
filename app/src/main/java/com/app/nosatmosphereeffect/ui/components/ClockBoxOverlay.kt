@@ -35,6 +35,12 @@ import kotlin.math.abs
 @Composable
 internal fun ClockBoxOverlay(
     box: ClockBoxRect,
+    /**
+     * A second box drawn faintly and not dragged — the clock's while the date
+     * is being placed, and the date's otherwise. Both are on screen at once so
+     * that placing one against the other does not need guesswork.
+     */
+    passiveBox: ClockBoxRect? = null,
     /** True when the clock is exactly centred, which lights the centre guide. */
     centered: Boolean,
     showHandles: Boolean,
@@ -52,6 +58,7 @@ internal fun ClockBoxOverlay(
     // every movement, so each swipe produced one small step and then had to
     // clear the touch slop all over again.
     val currentBox by rememberUpdatedState(box)
+    val currentPassive by rememberUpdatedState(passiveBox)
     val boxChanged by rememberUpdatedState(onBoxChange)
     val dragStarted by rememberUpdatedState(onDragStarted)
     val dragFinished by rememberUpdatedState(onDragFinished)
@@ -96,6 +103,7 @@ internal fun ClockBoxOverlay(
             }
     ) {
         drawCentreGuide(currentBox, centered)
+        currentPassive?.let { drawPassiveBox(it) }
         drawBox(currentBox, showHandles, handleRadiusPx)
     }
 }
@@ -167,6 +175,19 @@ private fun DrawScope.drawCentreGuide(box: ClockBoxRect, centered: Boolean) {
     )
 }
 
+/** The box that is not being dragged: shown, but visibly not the target. */
+private fun DrawScope.drawPassiveBox(box: ClockBoxRect) {
+    val width = box.width * size.width
+    val height = box.height * size.height
+    if (width <= 0f || height <= 0f) return
+    drawRect(
+        color = PASSIVE_BOX_COLOR,
+        topLeft = Offset(box.left * size.width, box.top * size.height),
+        size = Size(width, height),
+        style = Stroke(width = 1f)
+    )
+}
+
 private fun DrawScope.drawBox(box: ClockBoxRect, showHandles: Boolean, handleRadius: Float) {
     val left = box.left * size.width
     val top = box.top * size.height
@@ -213,6 +234,7 @@ private fun DrawScope.drawBox(box: ClockBoxRect, showHandles: Boolean, handleRad
 private const val HANDLE_TOUCH_DP = 28
 private const val HANDLE_RADIUS_DP = 7
 private val BOX_COLOR = Color.White.copy(alpha = 0.85f)
+private val PASSIVE_BOX_COLOR = Color.White.copy(alpha = 0.3f)
 private val HANDLE_FILL = Color.White.copy(alpha = 0.95f)
 private val HANDLE_BORDER = Color.Black.copy(alpha = 0.35f)
 private val CENTRE_GUIDE_COLOR = Color.White.copy(alpha = 0.28f)

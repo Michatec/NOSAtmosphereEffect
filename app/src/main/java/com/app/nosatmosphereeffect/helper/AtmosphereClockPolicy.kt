@@ -27,8 +27,7 @@ object AtmosphereClockPolicy {
     const val ENABLED_KEY = "atmosphere_clock_enabled"
     const val DEPTH_KEY = "atmosphere_clock_depth"
     const val STYLE_KEY = "atmosphere_clock_style"
-    const val SECONDS_KEY = "atmosphere_clock_seconds"
-    /** Draws the day and date above the digits, as the lock screen does. */
+    /** Draws the day and date, placed and sized on its own. */
     const val DATE_KEY = "atmosphere_clock_date"
     const val ANIMATE_KEY = "atmosphere_clock_animate"
     const val CENTER_X_KEY = "atmosphere_clock_center_x"
@@ -44,6 +43,29 @@ object AtmosphereClockPolicy {
      */
     const val WIDTH_SCALE_KEY = "atmosphere_clock_width_scale"
     const val HEIGHT_SCALE_KEY = "atmosphere_clock_height_scale"
+
+    /**
+     * The date's own placement, stored exactly like the clock's and dragged
+     * the same way. It is drawn into the same bitmap as the digits — one
+     * texture, one rectangle, on every effect and both backends — so these
+     * are converted to a position relative to the digits before they reach
+     * the face; see [ClockBoxPlacement.relativeDateBox].
+     */
+    const val DATE_CENTER_X_KEY = "atmosphere_clock_date_center_x"
+    const val DATE_TOP_KEY = "atmosphere_clock_date_top"
+    const val DATE_HEIGHT_KEY = "atmosphere_clock_date_height"
+    const val DATE_WIDTH_SCALE_KEY = "atmosphere_clock_date_width_scale"
+
+    /**
+     * Which meaning the stored geometry has.
+     *
+     * Version 1 stored the face *texture's* rectangle; version 2 stores the
+     * digits' own box, so that a face's animation margin — and the date, which
+     * changes the bitmap's size wherever it is dragged to — no longer moves
+     * the clock. [migrateGeometry] converts a version 1 value once.
+     */
+    const val GEOMETRY_VERSION_KEY = "atmosphere_clock_geometry_version"
+    const val GEOMETRY_VERSION = 2
     const val OPACITY_KEY = "atmosphere_clock_opacity"
     /**
      * Stored as an ARGB int. [ClockPalette.AUTO] (0) means "follow the
@@ -80,8 +102,13 @@ object AtmosphereClockPolicy {
     const val MAX_AXIS_SCALE = 2.6f
     const val DEFAULT_OPACITY = 1f
     const val DEFAULT_DEPTH = true
-    const val DEFAULT_SECONDS = false
     const val DEFAULT_DATE = false
+
+    /** The date sits just above the clock until it is dragged elsewhere. */
+    const val DEFAULT_DATE_CENTER_X = 0.5f
+    const val DEFAULT_DATE_HEIGHT = 0.042f
+    const val DEFAULT_DATE_TOP = 0.07f
+    const val DEFAULT_DATE_WIDTH_SCALE = 1f
     const val DEFAULT_ANIMATE = true
     const val DEFAULT_COLOR = ClockPalette.AUTO
     const val HOUR_FORMAT_SYSTEM = "system"
@@ -92,11 +119,10 @@ object AtmosphereClockPolicy {
     // Loose validity guards, not placement rules.
     //
     // These bound what may be *stored*; where the clock may actually sit is
-    // decided by ClockBoxPlacement, which knows where the digits are inside
-    // the face texture. [TOP_KEY] is the top of that texture, and the digits
-    // begin a fraction of the texture's height below it — so a fixed floor
-    // here stopped a tall clock further down the screen than a short one,
-    // which is the opposite of a limit anyone asked for.
+    // decided by ClockBoxPlacement, which clamps the box the user sees to the
+    // screen. A tighter floor here used to stop a tall clock further down the
+    // screen than a short one, which is the opposite of a limit anyone asked
+    // for.
     private const val MIN_CENTER_X = 0f
     private const val MAX_CENTER_X = 1f
     private const val MIN_TOP = -0.5f
@@ -108,12 +134,50 @@ object AtmosphereClockPolicy {
      */
     const val MAX_HEIGHT = 1.6f
 
+    /** The clock's placement as stored, ready for [ClockBoxPlacement]. */
+    val DEFAULT_PLACEMENT = ClockPlacement(
+        centerX = DEFAULT_CENTER_X,
+        top = DEFAULT_TOP,
+        height = DEFAULT_HEIGHT,
+        widthScale = DEFAULT_WIDTH_SCALE
+    )
+
+    val DEFAULT_DATE_PLACEMENT = ClockPlacement(
+        centerX = DEFAULT_DATE_CENTER_X,
+        top = DEFAULT_DATE_TOP,
+        height = DEFAULT_DATE_HEIGHT,
+        widthScale = DEFAULT_DATE_WIDTH_SCALE
+    )
+
+    /**
+     * Nominal share of a version 1 face texture that the digits occupied, for
+     * [migrateGeometry]. Measured from the default face: the exact figures
+     * depend on the style and on the device's fonts, so this converts an old
+     * clock to about the same size in about the same place rather than
+     * exactly — which is all the old numbers were ever worth, since the same
+     * stored values already drew different faces differently.
+     */
+    private const val LEGACY_CONTENT_HEIGHT = 0.63f
+    private const val LEGACY_CONTENT_TOP = 0.18f
+
+    /**
+     * Converts a version 1 (texture-relative) placement to version 2
+     * (digits-relative). [ClockPlacement.widthScale] needs no conversion: it
+     * is a ratio of the width to the height, and both shrank by the same
+     * factor.
+     */
+    fun migrateGeometry(legacy: ClockPlacement): ClockPlacement = ClockPlacement(
+        centerX = sanitizeCenterX(legacy.centerX),
+        top = sanitizeTop(legacy.top + LEGACY_CONTENT_TOP * legacy.height),
+        height = sanitizeHeight(legacy.height * LEGACY_CONTENT_HEIGHT),
+        widthScale = sanitizeAxisScale(legacy.widthScale)
+    )
+
     /** All keys this feature owns, for the Advanced Settings reset path. */
     val ALL_KEYS: List<String> = listOf(
         ENABLED_KEY,
         DEPTH_KEY,
         STYLE_KEY,
-        SECONDS_KEY,
         DATE_KEY,
         ANIMATE_KEY,
         COLOR_KEY,
@@ -124,6 +188,11 @@ object AtmosphereClockPolicy {
         HEIGHT_KEY,
         WIDTH_SCALE_KEY,
         HEIGHT_SCALE_KEY,
+        DATE_CENTER_X_KEY,
+        DATE_TOP_KEY,
+        DATE_HEIGHT_KEY,
+        DATE_WIDTH_SCALE_KEY,
+        GEOMETRY_VERSION_KEY,
         OPACITY_KEY
     )
 
