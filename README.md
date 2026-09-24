@@ -72,12 +72,14 @@ If Canvas Sketch cannot find a confident foreground subject, it falls back to sk
 
 Every effect can draw a clock into the wallpaper itself (Advanced Settings → Clock; single-image mode only). **Choose style, position & size** opens a live preview of the clock on your wallpaper. A box is drawn around it: drag inside the box to move the clock, drag a corner to change both dimensions or an edge to change one, and a centre guide lights up when it is exactly centred. There are no size sliders — the box is the size. The clock is also always shown in the wallpaper picker's preview, whichever screen it is set to appear on.
 
-Two faces, both made of glass. Each digit is a solid piece of it: the wallpaper bends as it passes through, hardest where the stroke rolls over at its edge and gently across the middle, and what is behind the glass is magnified the way thickness magnifies. The edges carry a bright contour and a highlight where they turn through the light.
+Four faces, in two kinds of glass, each offered as one row or two.
 
-* **Glass:** hours and minutes side by side — the default.
-* **Glass Stacked:** hours above minutes, which goes much larger on a phone.
+* **Glass** and **Glass Stacked:** the original face. Clear through the middle, with the light caught around the bevel at the edge of every stroke.
+* **Translucent** and **Translucent Stacked:** each digit is a solid piece of glass. The wallpaper bends as it passes through — hardest where the stroke rolls over at its edge, gently across the middle — and what is behind is magnified the way thickness magnifies.
 
-**Frost** sets how diffuse the glass is, from clear — the wallpaper sharp through the digits — through etched to nearly milk-white. **Tint** colours what comes through while leaving the highlights white.
+A stacked face puts the hours above the minutes, which goes much larger on a phone, with the separator's two dots turned on their side in the gap between them. **Glass** in one row is the default.
+
+**Frost** sets how diffuse a translucent face is, from clear — the wallpaper sharp through the digits — through etched to nearly milk-white. The glass faces have no frost: they are clear except at their bevel, so frosting one would fog an edge and nothing else. **Tint** colours what comes through while leaving the highlights white.
 
 **Show date** adds the day and date in the clock's own typeface, lit as its own piece of glass rather than as a scaled-down copy of the clock's. It gets its own box, so it is placed and sized exactly like the clock rather than being pinned above it: drag whichever box you are touching, or pick **Clock** or **Date** to be explicit.
 
