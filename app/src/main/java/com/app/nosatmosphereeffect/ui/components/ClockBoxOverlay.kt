@@ -44,8 +44,13 @@ internal fun ClockBoxOverlay(
     /** True when the clock is exactly centred, which lights the centre guide. */
     centered: Boolean,
     showHandles: Boolean,
-    onBoxChange: (ClockBoxRect, ClockBoxHandle) -> Unit,
-    onDragStarted: () -> Unit,
+    /**
+     * The third argument is true when the gesture grabbed [passiveBox]: the
+     * finger landed on the box that is not selected, so that is the one being
+     * dragged and the caller should follow the selection to it.
+     */
+    onBoxChange: (ClockBoxRect, ClockBoxHandle, Boolean) -> Unit,
+    onDragStarted: (Boolean) -> Unit,
     onDragFinished: () -> Unit,
     onTap: (Offset) -> Unit,
     modifier: Modifier = Modifier
@@ -74,14 +79,30 @@ internal fun ClockBoxOverlay(
                 var handle = ClockBoxHandle.MOVE
                 var startBox = ClockBoxRect(0f, 0f, 0f, 0f)
                 var travelled = Offset.Zero
+                var grabbedPassive = false
                 detectDragGestures(
                     onDragStart = { position ->
                         val width = size.width.toFloat()
                         val height = size.height.toFloat()
-                        startBox = currentBox
                         travelled = Offset.Zero
-                        handle = handleAt(position, startBox, width, height, touchSlopPx)
-                        dragStarted()
+                        val activeHandle =
+                            handleAt(position, currentBox, width, height, touchSlopPx)
+                        // The selected box owns the gesture, except when the
+                        // finger is on the other one and not on this one:
+                        // dragging what you are touching is what everyone
+                        // expects, and it saves a trip to the chips to switch.
+                        grabbedPassive = currentPassive?.let { passive ->
+                            activeHandle == ClockBoxHandle.MOVE &&
+                                !touches(position, currentBox, width, height, touchSlopPx) &&
+                                touches(position, passive, width, height, touchSlopPx)
+                        } ?: false
+                        startBox = if (grabbedPassive) currentPassive!! else currentBox
+                        handle = if (grabbedPassive) {
+                            handleAt(position, startBox, width, height, touchSlopPx)
+                        } else {
+                            activeHandle
+                        }
+                        dragStarted(grabbedPassive)
                     },
                     onDragEnd = { dragFinished() },
                     onDragCancel = { dragFinished() }
@@ -97,7 +118,8 @@ internal fun ClockBoxOverlay(
                     travelled += drag
                     boxChanged(
                         startBox.movedBy(handle, travelled.x / width, travelled.y / height),
-                        handle
+                        handle,
+                        grabbedPassive
                     )
                 }
             }
@@ -121,6 +143,20 @@ private fun ClockBoxRect.movedBy(handle: ClockBoxHandle, dx: Float, dy: Float): 
     ClockBoxHandle.RIGHT -> ClockBoxRect(left, top, right + dx, bottom)
     ClockBoxHandle.TOP -> ClockBoxRect(left, top + dy, right, bottom)
     ClockBoxHandle.BOTTOM -> ClockBoxRect(left, top, right, bottom + dy)
+}
+
+/** True when [position] is inside [box] or within [slop] of its edges. */
+private fun touches(
+    position: Offset,
+    box: ClockBoxRect,
+    viewWidth: Float,
+    viewHeight: Float,
+    slop: Float
+): Boolean {
+    return position.x >= box.left * viewWidth - slop &&
+        position.x <= box.right * viewWidth + slop &&
+        position.y >= box.top * viewHeight - slop &&
+        position.y <= box.bottom * viewHeight + slop
 }
 
 private fun handleAt(

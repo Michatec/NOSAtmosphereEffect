@@ -443,6 +443,11 @@ class EffectPreviewService(
                             AtmosphereClockPolicy.OPACITY_KEY,
                             AtmosphereClockPolicy.DEFAULT_OPACITY
                         ),
+                        clockFrost = previewFloat(
+                            prefs,
+                            AtmosphereClockPolicy.FROST_KEY,
+                            AtmosphereClockPolicy.DEFAULT_FROST
+                        ),
                         clockColor = ClockPalette.resolve(
                             previewInt(
                                 prefs,

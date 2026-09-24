@@ -198,6 +198,14 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
             )
         )
     }
+    var frost by remember {
+        mutableFloatStateOf(
+            prefs.getFloat(
+                AtmosphereClockPolicy.FROST_KEY,
+                AtmosphereClockPolicy.DEFAULT_FROST
+            )
+        )
+    }
     var style by remember {
         mutableStateOf(
             ClockStyle.fromId(prefs.getString(AtmosphereClockPolicy.STYLE_KEY, null))
@@ -279,6 +287,7 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
         heightFraction = AtmosphereClockPolicy.sanitizeHeight(heightFraction)
         widthScale = AtmosphereClockPolicy.sanitizeAxisScale(widthScale)
         opacity = AtmosphereClockPolicy.sanitizeOpacity(opacity)
+        frost = AtmosphereClockPolicy.sanitizeFrost(frost)
         dateCenterX = AtmosphereClockPolicy.sanitizeCenterX(dateCenterX)
         dateTop = AtmosphereClockPolicy.sanitizeTop(dateTop)
         dateHeightFraction = AtmosphereClockPolicy.sanitizeHeight(dateHeightFraction)
@@ -290,6 +299,7 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
             putFloat(AtmosphereClockPolicy.WIDTH_SCALE_KEY, widthScale)
             putFloat(AtmosphereClockPolicy.HEIGHT_SCALE_KEY, heightScale)
             putFloat(AtmosphereClockPolicy.OPACITY_KEY, opacity)
+            putFloat(AtmosphereClockPolicy.FROST_KEY, frost)
             putFloat(AtmosphereClockPolicy.DATE_CENTER_X_KEY, dateCenterX)
             putFloat(AtmosphereClockPolicy.DATE_TOP_KEY, dateTop)
             putFloat(AtmosphereClockPolicy.DATE_HEIGHT_KEY, dateHeightFraction)
@@ -315,7 +325,7 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
     }
 
     LaunchedEffect(
-        centerX, top, heightFraction, widthScale, heightScale, opacity, style,
+        centerX, top, heightFraction, widthScale, heightScale, opacity, frost, style,
         showDate, dateCenterX, dateTop, dateHeightFraction, dateWidthScale,
         animate, colorPref, hourFormat
     ) {
@@ -443,12 +453,16 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
     // gesture is resolved against it, so a drag cannot drift, and clamping at
     // a limit cannot feed back into the next frame.
     var dragStart by remember { mutableStateOf<ClockPlacement?>(null) }
+    // Which box this gesture grabbed, fixed when the finger went down. The
+    // selection follows the grab, so reading the selection here instead would
+    // change target mid-drag.
+    var draggingDate by remember { mutableStateOf(false) }
 
     fun applyBox(proposed: ClockBoxRect, handle: ClockBoxHandle) {
         interacting = true
         lastInteractionMs = System.currentTimeMillis()
-        val editing = editingDate && showDate
-        val origin = dragStart ?: activePlacement
+        val editing = draggingDate && showDate
+        val origin = dragStart ?: if (editing) datePlacement else placement
         val settled = ClockBoxPlacement.apply(
             start = origin,
             proposed = proposed,
@@ -458,7 +472,7 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
         )
         if (handle == ClockBoxHandle.MOVE &&
             ClockBoxPlacement.isCentred(settled) &&
-            !ClockBoxPlacement.isCentred(activePlacement)
+            !ClockBoxPlacement.isCentred(if (editing) datePlacement else placement)
         ) {
             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
         }
@@ -487,6 +501,7 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
                 face = faceBitmap,
                 box = textureBox,
                 opacity = opacity,
+                frost = frost,
                 // The segment faces are solid, not glass: drawing them through
                 // the refraction would show a preview of a clock the wallpaper
                 // is not going to draw.
@@ -512,9 +527,14 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
                 },
                 centered = ClockBoxPlacement.isCentred(activePlacement),
                 showHandles = !eyedropperArmed,
-                onBoxChange = ::applyBox,
-                onDragStarted = {
-                    dragStart = activePlacement
+                onBoxChange = { rect, handle, _ -> applyBox(rect, handle) },
+                onDragStarted = { grabbedPassive ->
+                    val target = if (grabbedPassive) !editingDate else editingDate
+                    draggingDate = target && showDate
+                    // The selection follows the finger, so the chips and the
+                    // hint text agree with what is actually being dragged.
+                    if (target != editingDate) editingDate = target
+                    dragStart = if (draggingDate) datePlacement else placement
                     interacting = true
                     lastInteractionMs = System.currentTimeMillis()
                 },
@@ -611,6 +631,8 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
                 onStyleSelected = { style = it },
                 opacity = opacity,
                 onOpacityChange = { opacity = AtmosphereClockPolicy.sanitizeOpacity(it) },
+                frost = frost,
+                onFrostChange = { frost = AtmosphereClockPolicy.sanitizeFrost(it) },
                 showDate = showDate,
                 onShowDateChange = {
                     showDate = it
@@ -641,6 +663,7 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
                     heightFraction = AtmosphereClockPolicy.DEFAULT_HEIGHT
                     widthScale = AtmosphereClockPolicy.DEFAULT_WIDTH_SCALE
                     opacity = AtmosphereClockPolicy.DEFAULT_OPACITY
+                    frost = AtmosphereClockPolicy.DEFAULT_FROST
                     dateCenterX = AtmosphereClockPolicy.DEFAULT_DATE_CENTER_X
                     dateTop = AtmosphereClockPolicy.DEFAULT_DATE_TOP
                     dateHeightFraction = AtmosphereClockPolicy.DEFAULT_DATE_HEIGHT
@@ -658,6 +681,8 @@ private fun ClockControls(
     onStyleSelected: (ClockStyle) -> Unit,
     opacity: Float,
     onOpacityChange: (Float) -> Unit,
+    frost: Float,
+    onFrostChange: (Float) -> Unit,
     showDate: Boolean,
     onShowDateChange: (Boolean) -> Unit,
     editingDate: Boolean,
@@ -782,6 +807,14 @@ private fun ClockControls(
             value = opacity,
             valueRange = 0f..1f,
             onValueChange = onOpacityChange
+        )
+        // How diffuse the glass is: at 0 the wallpaper shows through sharply,
+        // at 1 it is milky and the digits read as frosted.
+        LabelledSlider(
+            label = "Frost",
+            value = frost,
+            valueRange = 0f..1f,
+            onValueChange = onFrostChange
         )
 
         Spacer(Modifier.height(4.dp))

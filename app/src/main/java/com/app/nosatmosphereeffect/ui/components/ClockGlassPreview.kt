@@ -46,9 +46,11 @@ internal fun ClockGlassPreview(
     /** Where the face goes, as fractions of this view. */
     box: ClockBoxRect,
     opacity: Float,
+    /** How frosted the glass is, 0..1. */
+    frost: Float,
     /**
-     * False for the solid faces, which are drawn as they are rather than as
-     * something the wallpaper refracts through.
+     * False for a flat face, which is drawn as it is rather than as something
+     * the wallpaper refracts through.
      */
     glass: Boolean,
     /** Changes whenever [face] has been redrawn in place. */
@@ -154,9 +156,13 @@ internal fun ClockGlassPreview(
         // Measured in face-texture texels, exactly as the wallpaper shader
         // does it, so the bevel is the same width on the same clock rather
         // than a fraction of the box (which made it far softer here).
+        // One face texel, in view pixels. The wallpaper shaders work in face
+        // texels throughout, so handing this over is what keeps the bevel the
+        // same width here as on the clock the wallpaper draws.
         shader.setFloatUniform(
-            "bevel",
-            (BEVEL_TEXELS * boxHeight / glyphs.height).coerceAtLeast(1f)
+            "texelPx",
+            (boxWidth / glyphs.width).coerceAtLeast(0.1f),
+            (boxHeight / glyphs.height).coerceAtLeast(0.1f)
         )
         // The wallpaper offsets in texture UV, where x spans the width and y
         // the height, so the same UV step is fewer pixels across than down.
@@ -166,31 +172,45 @@ internal fun ClockGlassPreview(
             refraction * viewWidth / viewHeight,
             refraction
         )
-        shader.setFloatUniform(
-            "frost",
-            FROST_FRACTION * viewWidth,
-            FROST_FRACTION * viewHeight
-        )
+        val frostUv = FROST_MIN + (FROST_MAX - FROST_MIN) * frost.coerceIn(0f, 1f)
+        shader.setFloatUniform("frost", frostUv * viewWidth, frostUv * viewHeight)
+        shader.setFloatUniform("frostLevel", frost.coerceIn(0f, 1f))
         shader.setFloatUniform("opacity", opacity.coerceIn(0f, 1f))
         paint.shader = shader
         drawIntoCanvas { it.nativeCanvas.drawRect(0f, 0f, viewWidth, viewHeight, paint) }
     }
 }
 
-/** The bevel width in face-texture texels; the effect shaders use the same 9. */
-private const val BEVEL_TEXELS = 9f
-private const val REFRACTION_FRACTION = 0.11f
-private const val FROST_FRACTION = 0.0032f
+/** The refraction offset per unit of tilt, as a fraction of the clock's height. */
+private const val REFRACTION_FRACTION = 0.012f
+/** The frost blur radius in wallpaper UV, at no frost and at full frost. */
+private const val FROST_MIN = 0.0016f
+private const val FROST_MAX = 0.0130f
 
 private const val GLASS_AGSL = """
 uniform shader wallpaper;
 uniform shader face;
 uniform float2 boxOrigin;
 uniform float2 boxSize;
-uniform float bevel;
+uniform float2 texelPx;
 uniform float2 refraction;
 uniform float2 frost;
+uniform float frostLevel;
 uniform float opacity;
+
+const float EDGE = 14.0;
+
+float faceAlpha(float2 coord) {
+    return float(face.eval(coord).a);
+}
+
+float2 faceGradient(float2 coord, float radius) {
+    float2 step = texelPx * radius;
+    return float2(
+        faceAlpha(coord + float2(step.x, 0.0)) - faceAlpha(coord - float2(step.x, 0.0)),
+        faceAlpha(coord + float2(0.0, step.y)) - faceAlpha(coord - float2(0.0, step.y))
+    );
+}
 
 half4 main(float2 coord) {
     float3 base = float3(wallpaper.eval(coord).rgb);
@@ -204,17 +224,33 @@ half4 main(float2 coord) {
         return half4(half3(base), 1.0);
     }
 
-    // Alpha rises into the glyph, so this points inwards; the outward surface
-    // normal tilts the opposite way.
-    float2 slope = 0.5 * float2(
-        float(face.eval(coord + float2(bevel, 0.0)).a) -
-            float(face.eval(coord - float2(bevel, 0.0)).a),
-        float(face.eval(coord + float2(0.0, bevel)).a) -
-            float(face.eval(coord - float2(0.0, bevel)).a)
-    );
-    float edge = clamp(length(slope) * 2.0, 0.0, 1.0);
+    // A port of clockGlass in the effect shaders — see the comments there for
+    // why the edge is measured this way rather than with a derivative.
+    float2 gradient = (
+        faceGradient(coord, 3.0) + faceGradient(coord, 7.0) + faceGradient(coord, EDGE)
+    ) / 3.0;
+    float gradientLength = length(gradient);
+    float2 inward = gradient / max(gradientLength, 1e-4);
 
-    float2 at = coord - slope * refraction;
+    float2 stride = inward * texelPx * (EDGE * 0.25);
+    float filled =
+        faceAlpha(coord - stride * 4.0) +
+        faceAlpha(coord - stride * 3.0) +
+        faceAlpha(coord - stride * 2.0) +
+        faceAlpha(coord - stride) +
+        body +
+        faceAlpha(coord + stride) +
+        faceAlpha(coord + stride * 2.0) +
+        faceAlpha(coord + stride * 3.0) +
+        faceAlpha(coord + stride * 4.0);
+    float depth = clamp((filled / 9.0 - 0.5) * 2.0, 0.0, 1.0);
+    float rim = (1.0 - depth) * smoothstep(0.02, 0.18, gradientLength);
+
+    float lift = sqrt(max(1.0 - rim * rim, 1e-4));
+    float tilt = min(rim / lift, 5.0);
+    float3 normal = normalize(float3(-inward * tilt * 0.55, 1.0));
+
+    float2 at = coord - inward * tilt * refraction;
     float3 refracted = (
         2.0 * float3(wallpaper.eval(at).rgb) +
         float3(wallpaper.eval(at + float2(frost.x, 0.0)).rgb) +
@@ -222,23 +258,26 @@ half4 main(float2 coord) {
         float3(wallpaper.eval(at + float2(0.0, frost.y)).rgb) +
         float3(wallpaper.eval(at - float2(0.0, frost.y)).rgb)
     ) / 6.0;
+    float milk = dot(refracted, float3(0.2126, 0.7152, 0.0722));
+    refracted = clamp(
+        mix(refracted, mix(refracted, float3(milk), 0.40) + float3(0.05), frostLevel),
+        0.0,
+        1.0
+    );
 
     // Light from the upper left (y grows downwards).
-    float3 normal = normalize(float3(-slope * 2.4, 1.0));
     float3 light = normalize(float3(-0.5, -0.72, 0.48));
-    float specular = pow(max(dot(normal, light), 0.0), 22.0) * edge;
-    float rim = smoothstep(0.12, 0.85, edge);
-    float shade = max(-dot(normal.xy, light.xy), 0.0) * edge;
+    float facing = dot(normal, light);
+    float sheen = max(facing, 0.0) * rim;
+    float glint = pow(max(facing, 0.0), 12.0) * rim;
+    float edgeLine = smoothstep(0.80, 1.0, rim);
+    float shade = max(-facing, 0.0) * rim;
 
     float3 tint = glyph.rgb / max(glyph.a, 0.001);
-    float3 glass = refracted * 1.05 + float3(0.035);
-    // Coloured glass: the chosen colour tints what shows through, while the
-    // rim and the specular stay white the way real glass reflects. At the old
-    // 0.16 the colour was barely visible, so picking one looked like it did
-    // nothing at all.
+    float3 glass = refracted + float3(0.02);
     glass = mix(glass, glass * tint, 0.55);
-    glass = glass + float3(rim * 0.20 + specular * 0.9);
-    glass = glass - float3(shade * 0.14);
+    glass = glass + float3(sheen * 0.40 + glint * 0.55 + edgeLine * 0.16);
+    glass = glass - float3(shade * 0.30);
     float3 result = mix(base, clamp(glass, 0.0, 1.0), body * opacity);
     return half4(half3(result), 1.0);
 }

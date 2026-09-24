@@ -288,64 +288,22 @@ class ClockFaceGeometryTest {
 
     @Test
     fun `every style stays inside its shaping limits`() {
-        // Bounds rather than a single rule, because the set deliberately
-        // spans two shapes: the tall narrow faces and the heavy wide ones.
-        // Both still need a floor, or a face would read as a caption sitting
-        // where a clock should be.
         ClockStyle.entries.forEach { style ->
-            // The typeface faces are glass; the drawn ones are solid, and
-            // dimming the minutes is theirs alone — a glass face's colour is
-            // the wallpaper showing through, which there is nothing to dim.
-            assertEquals(
-                "${style.id} disagrees about being glass",
-                !style.drawsSegments,
-                style.liquidGlass
-            )
-            assertTrue(
-                "${style.id} has an out-of-range minute dimming",
-                style.minuteDim in 0.4f..1f
-            )
-            if (style.liquidGlass) {
-                assertEquals(
-                    "${style.id} is glass, so its minutes cannot be dimmed",
-                    1f,
-                    style.minuteDim,
-                    0f
-                )
-            }
+            assertTrue("${style.id} should be a glass face", style.liquidGlass)
             assertTrue(
                 "${style.id} has an out-of-range horizontal scale",
                 style.horizontalScale in 0.8f..1f
             )
-            if (style.drawsSegments) {
-                // Drawn faces get their proportions from their segments, not
-                // from a typeface, so the stretch bounds do not apply.
-                assertTrue(
-                    "${style.id} has an unusable digit aspect",
-                    style.segmentAspect in 0.3f..1.2f
-                )
-                assertTrue(
-                    "${style.id} segments are too thin or too thick to read",
-                    style.segmentThickness in 0.1f..0.4f
-                )
-                assertTrue(
-                    "${style.id} has an out-of-range segment rounding",
-                    style.segmentRounding in 0f..1f
-                )
-                assertTrue(
-                    "${style.id} has a negative gap between digits",
-                    style.segmentGap >= 0f
-                )
-            } else {
-                assertTrue(
-                    "${style.id} should be stretched vertically",
-                    style.verticalStretch >= 1.3f
-                )
-                assertTrue(
-                    "${style.id} should not be stretched past legibility",
-                    style.verticalStretch <= 2.2f
-                )
-            }
+            // Tall and narrow is what reads as a display clock rather than a
+            // caption, but past this it reads as a distortion.
+            assertTrue(
+                "${style.id} should be stretched vertically",
+                style.verticalStretch >= 1.3f
+            )
+            assertTrue(
+                "${style.id} should not be stretched past legibility",
+                style.verticalStretch <= 2.2f
+            )
         }
     }
 
@@ -364,22 +322,11 @@ class ClockFaceGeometryTest {
     }
 
     @Test
-    fun `segment faces run their digits together`() {
-        // A colon has no segment form, so a separator would reserve a slot
-        // that draws nothing and leave a gap mid-clock.
-        ClockStyle.entries.filter { it.drawsSegments }.forEach { style ->
-            assertTrue("${style.id} must not use a separator", !style.usesSeparator)
-        }
-        assertTrue(
-            "the typeface faces should keep their colon",
-            ClockStyle.entries.filter { !it.drawsSegments }.all { it.stacked || it.usesSeparator }
+    fun `the offered faces are the two glass ones`() {
+        assertEquals(
+            listOf("liquid_glass", "liquid_glass_stacked"),
+            ClockStyle.entries.map { it.id }
         )
-    }
-
-    @Test
-    fun `both segment faces are offered`() {
-        val drawn = ClockStyle.entries.filter { it.drawsSegments }.map { it.id }
-        assertEquals(listOf("glass_segment", "glass_block"), drawn)
     }
 
     @Test
@@ -390,15 +337,21 @@ class ClockFaceGeometryTest {
         // using it back to the default.
         listOf(
             "liquid_glass",
-            "liquid_glass_stacked",
-            "glass_segment",
-            "glass_block"
+            "liquid_glass_stacked"
         ).forEach { id ->
             assertEquals(id, ClockStyle.fromId(id).id)
         }
         // The faces this set replaced fall back to the default rather than
         // leaving anyone with no clock at all.
-        listOf("modern", "display", "serif", "mono", "stacked").forEach { retired ->
+        listOf(
+            "modern",
+            "display",
+            "serif",
+            "mono",
+            "stacked",
+            "glass_segment",
+            "glass_block"
+        ).forEach { retired ->
             assertEquals(ClockStyle.DEFAULT.id, ClockStyle.fromId(retired).id)
         }
     }

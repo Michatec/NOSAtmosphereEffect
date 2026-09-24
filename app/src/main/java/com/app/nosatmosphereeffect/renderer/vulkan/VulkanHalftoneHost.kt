@@ -228,7 +228,7 @@ private class HalftoneBridge(
             clockOpacity = safe.clock.effectiveOpacity(safe.progress),
             clockUploaded = safe.clock.faceUploaded,
             clockDepth = safe.clock.depthEnabled,
-            clockGlass = safe.clock.liquidGlass
+            clockGlass = safe.clock.glassMeta
         )
     }
 

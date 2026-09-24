@@ -96,6 +96,10 @@ object ClockPreferences {
                 AtmosphereClockPolicy.OPACITY_KEY,
                 AtmosphereClockPolicy.DEFAULT_OPACITY
             ),
+            frost = preferences.readFloat(
+                AtmosphereClockPolicy.FROST_KEY,
+                AtmosphereClockPolicy.DEFAULT_FROST
+            ),
             requestedColor = requestedColor,
             // Left unresolved on purpose: deriving the wallpaper tint decodes
             // an image and runs Palette, which must not happen wherever this
