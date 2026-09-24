@@ -20,6 +20,21 @@ import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
 /**
+ * How a face is lit.
+ *
+ * Two different pieces of glass, not two settings of one. [GLASS] is the
+ * original face: a rim of bevel catching the light around an otherwise clear
+ * digit. [TRANSLUCENT] treats the whole digit as a solid piece — the
+ * wallpaper bends across the entire stroke and is magnified by the thickness
+ * — and is the only one with frost, because frosting a face that is only
+ * glass at its edges just fogs the edges.
+ */
+enum class ClockTreatment {
+    GLASS,
+    TRANSLUCENT
+}
+
+/**
  * The selectable clock faces.
  *
  * Every style is built from a typeface family that ships with Android
@@ -66,56 +81,87 @@ enum class ClockStyle(
      * what reads as a display clock; tall-and-wide just reads as large.
      */
     val horizontalScale: Float = 1f,
-    /**
-     * Drawn as refracting glass rather than solid colour: the shader bends,
-     * softens and highlights the wallpaper through the glyph shapes (see
-     * `compositeClock` in the effect shaders). The face bitmap only supplies
-     * the shape, so it is drawn without a drop shadow — a shadow would read
-     * as frosted glass outside the digits.
-     *
-     * Every face is glass. The flag stays because the shaders still carry it,
-     * and a flat face would only have to clear it.
-     */
-    val liquidGlass: Boolean = true
+    /** Which of the two glass treatments the shader gives this face. */
+    val treatment: ClockTreatment
 ) {
     /**
-     * Hours and minutes side by side, which is the shape a lock screen clock
-     * usually takes and the default here.
+     * The original face, and the default: hours and minutes side by side,
+     * clear through the middle with the light caught around the bevel of
+     * every stroke.
      *
-     * The weight is the one part of this that is a compromise. The faces these
-     * are modelled on are set in a geometric sans at about semibold, which no
+     * Its weight and stretch are the ones it shipped with. What has changed
+     * is underneath — its glyphs are distance fields now like everything
+     * else, so the outline is rebuilt at whatever size it is drawn rather
+     * than scaled up from the pixels it was rasterised at.
+     */
+    GLASS(
+        id = "liquid_glass",
+        label = "Glass",
+        description = "Glass digits in one row",
+        familyName = "sans-serif-black",
+        weight = 900,
+        letterSpacingEm = -0.03f,
+        stacked = false,
+        verticalStretch = 1.45f,
+        horizontalScale = 0.98f,
+        treatment = ClockTreatment.GLASS
+    ),
+
+    /** The original face, hours above minutes. */
+    GLASS_STACKED(
+        id = "liquid_glass_stacked",
+        label = "Glass Stacked",
+        description = "Glass digits, hours above minutes",
+        familyName = "sans-serif-black",
+        weight = 900,
+        letterSpacingEm = -0.04f,
+        stacked = true,
+        verticalStretch = 1.48f,
+        horizontalScale = 0.98f,
+        treatment = ClockTreatment.GLASS
+    ),
+
+    /**
+     * The whole digit as one piece of glass: the wallpaper bends across the
+     * entire stroke and is magnified by its thickness, and frost takes it
+     * from clear through etched to milk.
+     *
+     * The weight is the one part of this that is a compromise. The faces it
+     * is modelled on are set in a geometric sans at about semibold, which no
      * Android device ships; Roboto at 600 is the closest thing that is on
      * every device, and bundling a font would mean a licence audit for a
      * decoration. The stretch is what recovers the proportions.
      */
-    LIQUID_GLASS(
-        id = "liquid_glass",
-        label = "Glass",
-        description = "Glass digits in one row",
+    TRANSLUCENT(
+        id = "translucent",
+        label = "Translucent",
+        description = "One piece of glass, hours and minutes in a row",
         familyName = "sans-serif",
         weight = 600,
         letterSpacingEm = -0.02f,
         stacked = false,
         verticalStretch = 1.50f,
-        horizontalScale = 1f
+        horizontalScale = 1f,
+        treatment = ClockTreatment.TRANSLUCENT
     ),
 
-    /**
-     * Hours above minutes: two rows of two, which is how a clock gets truly
-     * large on a phone. Freed from fitting "00:00" across the width, each row
-     * is roughly twice the size.
-     */
-    LIQUID_GLASS_STACKED(
-        id = "liquid_glass_stacked",
-        label = "Glass Stacked",
-        description = "Glass digits, hours above minutes",
+    /** The same piece of glass, hours above minutes. */
+    TRANSLUCENT_STACKED(
+        id = "translucent_stacked",
+        label = "Translucent Stacked",
+        description = "One piece of glass, hours above minutes",
         familyName = "sans-serif",
         weight = 600,
         letterSpacingEm = -0.03f,
         stacked = true,
         verticalStretch = 1.52f,
-        horizontalScale = 1f
+        horizontalScale = 1f,
+        treatment = ClockTreatment.TRANSLUCENT
     );
+
+    /** Only the translucent faces are glass all the way through to frost. */
+    val usesFrost: Boolean
+        get() = treatment == ClockTreatment.TRANSLUCENT
 
     fun typeface(): Typeface {
         return try {
@@ -130,7 +176,7 @@ enum class ClockStyle(
     }
 
     companion object {
-        val DEFAULT = LIQUID_GLASS
+        val DEFAULT = GLASS
 
         fun fromId(id: String?): ClockStyle {
             if (id == null) return DEFAULT
