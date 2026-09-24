@@ -210,22 +210,26 @@ data class ClockOverlayState(
             widthScale = dateWidthScale
         )
 
-    /** True when the face should be drawn as refracting glass. */
-    val liquidGlass: Boolean
-        get() = style.liquidGlass
+    /** Which of the two glass treatments this face is lit with. */
+    val treatment: ClockTreatment
+        get() = style.treatment
 
     /**
-     * The single number the shaders read for the glass: 0 for a flat face, and
-     * `1 + frost` for a glass one.
+     * The single number the shaders read for the glass: 0 draws nothing,
+     * `1 + frost` is a translucent face at that frost level, and 3 is the
+     * original glass face, which has no frost.
      *
-     * Two settings in one float because the shaders take it in a slot that
+     * Three settings in one float because the shaders take it in a slot that
      * already exists — `uClockGlass` on GLES, `clockMeta.w` on Vulkan. Adding
      * a field to six push-constant structs and six shader uniform blocks to
-     * carry a second number is the kind of change that has broken this
-     * backend before, and the encoding is exact.
+     * carry them separately is the kind of change that has broken this backend
+     * before, and the encoding is exact.
      */
     val glassMeta: Float
-        get() = if (liquidGlass) 1f + AtmosphereClockPolicy.sanitizeFrost(frost) else 0f
+        get() = when (treatment) {
+            ClockTreatment.GLASS -> 3f
+            ClockTreatment.TRANSLUCENT -> 1f + AtmosphereClockPolicy.sanitizeFrost(frost)
+        }
 
     /**
      * The face texture's top edge — where the renderers place the bitmap.

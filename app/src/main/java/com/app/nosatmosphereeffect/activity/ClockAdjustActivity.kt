@@ -87,6 +87,7 @@ import com.app.nosatmosphereeffect.helper.ClockBoxHandle
 import com.app.nosatmosphereeffect.helper.ClockBoxPlacement
 import com.app.nosatmosphereeffect.helper.ClockBoxRect
 import com.app.nosatmosphereeffect.helper.ClockFaceBox
+import com.app.nosatmosphereeffect.helper.ClockOverlayState
 import com.app.nosatmosphereeffect.helper.ClockPlacement
 import com.app.nosatmosphereeffect.helper.ClockPreferences
 import com.app.nosatmosphereeffect.helper.ClockFaceRenderer
@@ -501,11 +502,12 @@ private fun ClockAdjustScreen(onDone: () -> Unit) {
                 face = faceBitmap,
                 box = textureBox,
                 opacity = opacity,
-                frost = frost,
-                // The segment faces are solid, not glass: drawing them through
-                // the refraction would show a preview of a clock the wallpaper
-                // is not going to draw.
-                glass = style.liquidGlass,
+                // The same number the wallpaper's shaders are given, so the
+                // preview picks the same treatment and frost level.
+                mode = ClockOverlayState(
+                    styleId = style.id,
+                    frost = frost
+                ).glassMeta,
                 faceRevision = faceRevision,
                 modifier = Modifier.fillMaxSize()
             )
@@ -755,7 +757,7 @@ private fun ClockControls(
             // from the wallpaper showing through, and the chosen colour tints
             // that rather than filling the digits with a flat colour. The
             // solid faces do take it as their colour.
-            SectionLabel(if (selected.liquidGlass) "Glass tint" else "Colour")
+            SectionLabel("Glass tint")
             Spacer(Modifier.width(8.dp))
             AtmoTextButton(
                 text = if (pickerOpen) "Close wheel" else "Colour wheel",
@@ -809,13 +811,17 @@ private fun ClockControls(
             onValueChange = onOpacityChange
         )
         // How diffuse the glass is: at 0 the wallpaper shows through sharply,
-        // at 1 it is milky and the digits read as frosted.
-        LabelledSlider(
-            label = "Frost",
-            value = frost,
-            valueRange = 0f..1f,
-            onValueChange = onFrostChange
-        )
+        // at 1 it is milky and the digits read as frosted. Only the
+        // translucent faces have it — the glass ones are clear except at
+        // their bevel, so frosting them would fog an edge and nothing else.
+        if (selected.usesFrost) {
+            LabelledSlider(
+                label = "Frost",
+                value = frost,
+                valueRange = 0f..1f,
+                onValueChange = onFrostChange
+            )
+        }
 
         Spacer(Modifier.height(4.dp))
         SectionLabel("Hour format")
