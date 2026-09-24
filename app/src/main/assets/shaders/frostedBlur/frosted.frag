@@ -124,27 +124,41 @@ vec3 clockGlass(
     vec2 magnify = (clockUv - 0.5) * rectSize * (0.060 * depth);
     vec2 sampleUv = clamp(vTexCoord - bend - magnify, 0.0, 1.0);
 
-    // Frost scatters what comes through: a wider disc as it rises, and a
-    // milkier, flatter transmission with it.
-    float blur = mix(0.0012, 0.0110, frostLevel);
-    float diagonal = blur * 0.7;
-    vec3 refracted = (
-        2.0 * texture(uTextureSharp, sampleUv).rgb +
-        texture(uTextureSharp, clamp(sampleUv + vec2(blur, 0.0), 0.0, 1.0)).rgb +
-        texture(uTextureSharp, clamp(sampleUv - vec2(blur, 0.0), 0.0, 1.0)).rgb +
-        texture(uTextureSharp, clamp(sampleUv + vec2(0.0, blur), 0.0, 1.0)).rgb +
-        texture(uTextureSharp, clamp(sampleUv - vec2(0.0, blur), 0.0, 1.0)).rgb +
-        texture(uTextureSharp, clamp(sampleUv + vec2(diagonal, diagonal), 0.0, 1.0)).rgb +
-        texture(uTextureSharp, clamp(sampleUv - vec2(diagonal, diagonal), 0.0, 1.0)).rgb +
-        texture(uTextureSharp, clamp(sampleUv + vec2(diagonal, -diagonal), 0.0, 1.0)).rgb +
-        texture(uTextureSharp, clamp(sampleUv - vec2(diagonal, -diagonal), 0.0, 1.0)).rgb
-    ) / 10.0;
+    // Frost scatters what comes through. Nothing is sampled for it until
+    // there is some: the level is a uniform, so this branch is taken by the
+    // whole draw or none of it, and a clear clock costs eight fewer fetches
+    // per pixel than a frosted one.
+    vec3 refracted = texture(uTextureSharp, sampleUv).rgb;
+    if (frostLevel > 0.004) {
+        float blur = mix(0.0012, 0.0110, frostLevel);
+        float diagonal = blur * 0.7;
+        refracted = (
+            2.0 * refracted +
+            texture(uTextureSharp, clamp(sampleUv + vec2(blur, 0.0), 0.0, 1.0)).rgb +
+            texture(uTextureSharp, clamp(sampleUv - vec2(blur, 0.0), 0.0, 1.0)).rgb +
+            texture(uTextureSharp, clamp(sampleUv + vec2(0.0, blur), 0.0, 1.0)).rgb +
+            texture(uTextureSharp, clamp(sampleUv - vec2(0.0, blur), 0.0, 1.0)).rgb +
+            texture(uTextureSharp, clamp(sampleUv + vec2(diagonal, diagonal), 0.0, 1.0)).rgb +
+            texture(uTextureSharp, clamp(sampleUv - vec2(diagonal, diagonal), 0.0, 1.0)).rgb +
+            texture(uTextureSharp, clamp(sampleUv + vec2(diagonal, -diagonal), 0.0, 1.0)).rgb +
+            texture(uTextureSharp, clamp(sampleUv - vec2(diagonal, -diagonal), 0.0, 1.0)).rgb
+        ) / 10.0;
+    }
     // Whatever the effect did to the wallpaper behind the clock applies to
     // what shows through it too.
     refracted = clamp(refracted + (color - texture(uTextureSharp, vTexCoord).rgb), 0.0, 1.0);
-    float milk = dot(refracted, vec3(0.2126, 0.7152, 0.0722));
-    vec3 etched = mix(vec3(milk), vec3(1.0), 0.45);
-    refracted = mix(refracted, etched, frostLevel * 0.90);
+
+    vec3 tint = clockSample.rgb / max(field, 0.001);
+    // Coloured glass: the chosen colour tints what comes through.
+    vec3 glass = mix(refracted, refracted * tint, 0.55);
+    if (frostLevel > 0.004) {
+        // Etched glass takes the colour it was given and lets what is behind
+        // it through only as brightness. Mixing towards the wallpaper's own
+        // luminance instead — which is what this did — left a white clock
+        // reading as whatever tint the photo happened to have.
+        float milk = dot(glass, vec3(0.2126, 0.7152, 0.0722));
+        glass = mix(glass, tint * (0.55 + 0.45 * milk), frostLevel * 0.92);
+    }
 
     // A key light from the upper left (texture y grows downwards) and a dim
     // fill from the lower right: one source alone leaves the far side of every
@@ -152,21 +166,23 @@ vec3 clockGlass(
     vec3 key = normalize(vec3(-0.45, -0.75, 0.48));
     vec3 fill = normalize(vec3(0.55, 0.62, 0.55));
     float facing = dot(normal, key);
-    float sheen = max(facing, 0.0) * shoulder;
-    float glint = pow(max(facing, 0.0), 22.0);
-    float bounce = max(dot(normal, fill), 0.0) * shoulder;
-    float shade = max(-facing, 0.0) * shoulder;
-    // The boundary itself: a bright hairline just inside the silhouette, which
-    // is the edge of the glass rather than an outline drawn around it.
-    float boundary = smoothstep(0.55, 1.0, shoulder);
+    // Concentrated into the turn of the edge rather than spread across the
+    // shoulder: over the whole shoulder it reads as a white band frosting the
+    // inside of every stroke, which is the opposite of one piece of glass.
+    float turn = shoulder * shoulder * shoulder;
+    float sheen = max(facing, 0.0) * turn;
+    float glint = pow(max(facing, 0.0), 22.0) * shoulder;
+    float bounce = max(dot(normal, fill), 0.0) * turn;
+    float shade = max(-facing, 0.0) * turn;
+    // The boundary itself: a hairline just inside the silhouette, which is the
+    // edge of the glass rather than an outline drawn around it.
+    float boundary = smoothstep(0.80, 1.0, shoulder);
+    // A frosted surface scatters its highlights away with everything else, so
+    // they fade out as the frost comes up and the digit stays one even tone.
+    float polish = 1.0 - 0.75 * frostLevel;
 
-    vec3 tint = clockSample.rgb / max(field, 0.001);
-    vec3 glass = refracted;
-    // Coloured glass: the chosen colour tints what comes through, while the
-    // highlights stay white the way a reflection does.
-    glass = mix(glass, glass * tint, 0.55);
-    glass += vec3(sheen * 0.18 + glint * 0.55 + bounce * 0.10 + boundary * 0.14);
-    glass -= vec3(shade * 0.22);
+    glass += vec3((sheen * 0.22 + glint * 0.5 + bounce * 0.12 + boundary * 0.16) * polish);
+    glass -= vec3(shade * 0.24 * polish);
     return mix(color, clamp(glass, 0.0, 1.0), coverage * opacity);
 }
 

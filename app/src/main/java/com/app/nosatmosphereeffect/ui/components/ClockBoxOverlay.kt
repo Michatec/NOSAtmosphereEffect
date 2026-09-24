@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import com.app.nosatmosphereeffect.helper.ClockBoxHandle
 import com.app.nosatmosphereeffect.helper.ClockBoxRect
 import kotlin.math.abs
+import kotlin.math.min
 
 /**
  * The frame the user drags to place and size the clock.
@@ -171,12 +172,18 @@ private fun handleAt(
     val right = box.right * viewWidth
     val top = box.top * viewHeight
     val bottom = box.bottom * viewHeight
-    val nearLeft = abs(position.x - left) <= slop
-    val nearRight = abs(position.x - right) <= slop
-    val nearTop = abs(position.y - top) <= slop
-    val nearBottom = abs(position.y - bottom) <= slop
-    val withinRows = position.y >= top - slop && position.y <= bottom + slop
-    val withinColumns = position.x >= left - slop && position.x <= right + slop
+    // The grab zones are capped at a share of the box, so a small one keeps a
+    // middle to drag. At a fixed size they met in the centre of the date's
+    // box and every attempt to move it resized it instead — the only way to
+    // place it was to make it big, move it, and shrink it again.
+    val slopX = min(slop, (right - left) * HANDLE_SHARE)
+    val slopY = min(slop, (bottom - top) * HANDLE_SHARE)
+    val nearLeft = abs(position.x - left) <= slopX
+    val nearRight = abs(position.x - right) <= slopX
+    val nearTop = abs(position.y - top) <= slopY
+    val nearBottom = abs(position.y - bottom) <= slopY
+    val withinRows = position.y >= top - slopY && position.y <= bottom + slopY
+    val withinColumns = position.x >= left - slopX && position.x <= right + slopX
 
     return when {
         nearLeft && nearTop -> ClockBoxHandle.TOP_LEFT
@@ -268,6 +275,8 @@ private fun DrawScope.drawBox(box: ClockBoxRect, showHandles: Boolean, handleRad
 }
 
 private const val HANDLE_TOUCH_DP = 28
+/** The most of a box's width or height either grab zone may take. */
+private const val HANDLE_SHARE = 0.28f
 private const val HANDLE_RADIUS_DP = 7
 private val BOX_COLOR = Color.White.copy(alpha = 0.85f)
 private val PASSIVE_BOX_COLOR = Color.White.copy(alpha = 0.3f)

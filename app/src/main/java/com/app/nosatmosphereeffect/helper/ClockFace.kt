@@ -209,8 +209,7 @@ class ClockFaceRenderer(private val context: Context) {
         set(value) {
             if (field != value) {
                 field = value
-                atlas.release()
-                atlas = ClockGlyphAtlas(value)
+                atlas = ClockGlyphAtlas.of(value)
                 invalidateLayout()
             }
         }
@@ -344,7 +343,7 @@ class ClockFaceRenderer(private val context: Context) {
      * The glyphs, as distance fields. Rebuilt when the face changes, because
      * the field has the style's own stretch and weight baked into it.
      */
-    private var atlas: ClockGlyphAtlas = ClockGlyphAtlas(style)
+    private var atlas: ClockGlyphAtlas = ClockGlyphAtlas.of(style)
     private val glyphMatrix = Matrix()
     private val tilePaint = Paint(Paint.FILTER_BITMAP_FLAG).apply {
         // Overlapping fields take the larger value rather than blending:
@@ -536,7 +535,7 @@ class ClockFaceRenderer(private val context: Context) {
     }
 
     fun release() {
-        atlas.release()
+        // The atlas is shared and outlives this renderer; see ClockGlyphAtlas.
         bitmap?.recycle()
         bitmap = null
         canvas = null
@@ -554,6 +553,7 @@ class ClockFaceRenderer(private val context: Context) {
         val progress = transitionProgress(uptimeMs)
         val entry = entryProgress(uptimeMs)
         drawDate(target, face, entry)
+        drawStackSeparator(target, face, entry)
         val rowCount = face.rows.size
         // Slots are staggered across the whole face, not per row, so a
         // stacked clock cascades down as well as across instead of both rows
@@ -647,6 +647,33 @@ class ClockFaceRenderer(private val context: Context) {
                 globalSlot++
             }
         }
+    }
+
+    /**
+     * The colon between the two halves of a stacked face.
+     *
+     * A single row carries its separator inline; a stacked one has nowhere to
+     * put it but the gap between the rows, which is sized for it.
+     */
+    private fun drawStackSeparator(target: Canvas, face: FaceLayout, entry: Float?) {
+        val centreY = face.separatorY ?: return
+        val tile = atlas.glyph(':') ?: return
+        val inkHeight = max(tile.inkBottom - tile.inkTop, 1f)
+        val scale = face.separatorHeight / inkHeight
+        if (scale <= 0f) return
+        val progress = entry?.let { easeOutCubic((staggeredEntry(it, 0) * 1.35f).coerceAtMost(1f)) }
+            ?: 1f
+        if (progress <= 0.004f) return
+        val spread = ClockGlyphAtlas.SPREAD_EM * ClockGlyphAtlas.CANONICAL_EM
+        glyphMatrix.reset()
+        glyphMatrix.setScale(scale, scale)
+        glyphMatrix.postTranslate(
+            face.digitsLeft + face.digitsWidth / 2f - (tile.advance / 2f + spread) * scale,
+            centreY - (tile.inkTop + inkHeight / 2f) * scale
+        )
+        tilePaint.color = color
+        tilePaint.alpha = erosionAlpha(progress)
+        target.drawBitmap(tile.bitmap, glyphMatrix, tilePaint)
     }
 
     /**
@@ -842,10 +869,6 @@ class ClockFaceRenderer(private val context: Context) {
         val separatorAdvance = textPaint.measureText(":")
 
         val stretch = style.verticalStretch
-        val metrics = textPaint.fontMetrics
-        // Glyphs are scaled about their baseline, so the ascent and descent
-        // both grow by the stretch factor and the row box grows with them.
-        val rowHeight = (metrics.bottom - metrics.top) * stretch
         val rowLayouts = rows.map { rowText ->
             val slots = rowText.map { character ->
                 Slot(
@@ -856,7 +879,6 @@ class ClockFaceRenderer(private val context: Context) {
         }
 
         val digitsWidth = rowLayouts.maxOfOrNull { it.width } ?: digitAdvance
-        val rowSpacing = if (rows.size > 1) textSize * ROW_SPACING_EM else 0f
 
         // The digits' ink box. This is what the user drags, so it is measured
         // from the glyphs themselves rather than from the font's line box:
@@ -865,8 +887,16 @@ class ClockFaceRenderer(private val context: Context) {
         val ink = android.graphics.Rect()
         textPaint.getTextBounds(DIGITS_SAMPLE, 0, DIGITS_SAMPLE.length, ink)
         val baselineFromInkTop = -ink.top * stretch
-        val digitsHeight = (rowHeight + rowSpacing) * (rows.size - 1) +
-            (ink.bottom - ink.top) * stretch
+        val inkHeight = (ink.bottom - ink.top) * stretch
+        // Rows are pitched on their ink rather than on the font's line box.
+        // A line box carries room for ascenders and descenders no digit has,
+        // and at this stretch that was two thirds of an em of empty space
+        // between the two halves of the time — the stack read as two numbers
+        // that happened to be near each other. The gap left is deliberate: it
+        // is where the separator goes.
+        val rowGap = if (rows.size > 1) textSize * STACK_GAP_EM else 0f
+        val rowPitch = inkHeight + rowGap
+        val digitsHeight = rowPitch * (rows.size - 1) + inkHeight
         val contentAspect = (digitsWidth / max(digitsHeight, 1f)).coerceIn(0.02f, 50f)
 
         // The date fills its own box, in digits-local coordinates for now:
@@ -936,7 +966,7 @@ class ClockFaceRenderer(private val context: Context) {
         val digitsTop = topExtent
         val baselines = FloatArray(rows.size)
         for (index in rows.indices) {
-            baselines[index] = digitsTop + baselineFromInkTop + (rowHeight + rowSpacing) * index
+            baselines[index] = digitsTop + baselineFromInkTop + rowPitch * index
         }
 
         val face = FaceLayout(
@@ -949,8 +979,14 @@ class ClockFaceRenderer(private val context: Context) {
             digitsHeight = digitsHeight,
             bitmapWidth = digitsWidth + sideExtent * 2f,
             bitmapHeight = digitsHeight + topExtent + bottomExtent,
-            rowHeight = rowHeight,
-            rowSpacing = rowSpacing,
+            // Centred in the gap between the rows, and only there: a single
+            // row already has its separator in the middle of the row.
+            separatorY = if (rows.size > 1) {
+                digitsTop + inkHeight + rowGap / 2f
+            } else {
+                null
+            },
+            separatorHeight = rowGap * STACK_SEPARATOR_FRACTION,
             contentAspect = contentAspect,
             dateText = dateText,
             dateBox = dateBox,
@@ -1159,8 +1195,9 @@ class ClockFaceRenderer(private val context: Context) {
         val digitsHeight: Float,
         val bitmapWidth: Float,
         val bitmapHeight: Float,
-        val rowHeight: Float,
-        val rowSpacing: Float,
+        /** Where the stacked separator's centre goes; null on a single row. */
+        val separatorY: Float?,
+        val separatorHeight: Float,
         val contentAspect: Float,
         val dateText: String?,
         /** The date's box this layout was built for; a new one means a new layout. */
@@ -1223,7 +1260,13 @@ class ClockFaceRenderer(private val context: Context) {
          * protecting in the first place.
          */
         const val TEXT_SIZE_PX = 280f
-        const val ROW_SPACING_EM = 0.04f
+        /**
+         * The gap between the two rows of a stacked face, as a fraction of
+         * the em. Sized for the separator that sits in it.
+         */
+        const val STACK_GAP_EM = 0.30f
+        /** How much of that gap the separator's own ink fills. */
+        const val STACK_SEPARATOR_FRACTION = 0.62f
         /**
          * Smallest the whole face may be rasterised at, whatever the date's
          * placement asks for. Below this the digits would be visibly soft.

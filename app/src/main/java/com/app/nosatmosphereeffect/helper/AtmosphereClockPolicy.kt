@@ -108,7 +108,12 @@ object AtmosphereClockPolicy {
     const val MIN_AXIS_SCALE = 0.35f
     const val MAX_AXIS_SCALE = 2.6f
     const val DEFAULT_OPACITY = 1f
-    const val DEFAULT_FROST = 0.35f
+    /**
+     * Clear by default. Frost is a departure from the glass rather than the
+     * normal state of it: it is the setting that makes a clock milky, and a
+     * clock that starts milky reads as one that has gone cloudy.
+     */
+    const val DEFAULT_FROST = 0f
     const val DEFAULT_DEPTH = true
     const val DEFAULT_DATE = false
 

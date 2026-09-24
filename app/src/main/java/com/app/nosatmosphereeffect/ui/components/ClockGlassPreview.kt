@@ -239,37 +239,45 @@ half4 main(float2 coord) {
     float2 magnify = (uv - 0.5) * magnification * depth;
     float2 at = coord - bend - magnify;
 
-    float2 blur = mix(blurMin, blurMax, frostLevel);
-    float2 diagonal = blur * 0.7;
-    float3 refracted = (
-        2.0 * float3(wallpaper.eval(at).rgb) +
-        float3(wallpaper.eval(at + float2(blur.x, 0.0)).rgb) +
-        float3(wallpaper.eval(at - float2(blur.x, 0.0)).rgb) +
-        float3(wallpaper.eval(at + float2(0.0, blur.y)).rgb) +
-        float3(wallpaper.eval(at - float2(0.0, blur.y)).rgb) +
-        float3(wallpaper.eval(at + diagonal).rgb) +
-        float3(wallpaper.eval(at - diagonal).rgb) +
-        float3(wallpaper.eval(at + float2(diagonal.x, -diagonal.y)).rgb) +
-        float3(wallpaper.eval(at - float2(diagonal.x, -diagonal.y)).rgb)
-    ) / 10.0;
-    float milk = dot(refracted, float3(0.2126, 0.7152, 0.0722));
-    float3 etched = mix(float3(milk), float3(1.0), 0.45);
-    refracted = mix(refracted, etched, frostLevel * 0.90);
+    // Nothing is sampled for frost until there is some — see the effect
+    // shaders, which take the same branch.
+    float3 refracted = float3(wallpaper.eval(at).rgb);
+    if (frostLevel > 0.004) {
+        float2 blur = mix(blurMin, blurMax, frostLevel);
+        float2 diagonal = blur * 0.7;
+        refracted = (
+            2.0 * refracted +
+            float3(wallpaper.eval(at + float2(blur.x, 0.0)).rgb) +
+            float3(wallpaper.eval(at - float2(blur.x, 0.0)).rgb) +
+            float3(wallpaper.eval(at + float2(0.0, blur.y)).rgb) +
+            float3(wallpaper.eval(at - float2(0.0, blur.y)).rgb) +
+            float3(wallpaper.eval(at + diagonal).rgb) +
+            float3(wallpaper.eval(at - diagonal).rgb) +
+            float3(wallpaper.eval(at + float2(diagonal.x, -diagonal.y)).rgb) +
+            float3(wallpaper.eval(at - float2(diagonal.x, -diagonal.y)).rgb)
+        ) / 10.0;
+    }
+
+    float3 tint = glyph.rgb / max(field, 0.001);
+    float3 glass = mix(refracted, refracted * tint, 0.55);
+    if (frostLevel > 0.004) {
+        float milk = dot(glass, float3(0.2126, 0.7152, 0.0722));
+        glass = mix(glass, tint * (0.55 + 0.45 * milk), frostLevel * 0.92);
+    }
 
     float3 key = normalize(float3(-0.45, -0.75, 0.48));
     float3 fill = normalize(float3(0.55, 0.62, 0.55));
     float facing = dot(normal, key);
-    float sheen = max(facing, 0.0) * shoulder;
-    float glint = pow(max(facing, 0.0), 22.0);
-    float bounce = max(dot(normal, fill), 0.0) * shoulder;
-    float shade = max(-facing, 0.0) * shoulder;
-    float boundary = smoothstep(0.55, 1.0, shoulder);
+    float turn = shoulder * shoulder * shoulder;
+    float sheen = max(facing, 0.0) * turn;
+    float glint = pow(max(facing, 0.0), 22.0) * shoulder;
+    float bounce = max(dot(normal, fill), 0.0) * turn;
+    float shade = max(-facing, 0.0) * turn;
+    float boundary = smoothstep(0.80, 1.0, shoulder);
+    float polish = 1.0 - 0.75 * frostLevel;
 
-    float3 tint = glyph.rgb / max(field, 0.001);
-    float3 glass = refracted;
-    glass = mix(glass, glass * tint, 0.55);
-    glass = glass + float3(sheen * 0.18 + glint * 0.55 + bounce * 0.10 + boundary * 0.14);
-    glass = glass - float3(shade * 0.22);
+    glass = glass + float3((sheen * 0.22 + glint * 0.5 + bounce * 0.12 + boundary * 0.16) * polish);
+    glass = glass - float3(shade * 0.24 * polish);
     float3 result = mix(base, clamp(glass, 0.0, 1.0), coverage * opacity);
     return half4(half3(result), 1.0);
 }

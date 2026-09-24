@@ -44,7 +44,7 @@ import kotlin.math.sqrt
  * keeps a drag of the date's box from re-rasterising the alphabet sixty times
  * a second.
  */
-internal class ClockGlyphAtlas(
+internal class ClockGlyphAtlas private constructor(
     private val style: ClockStyle
 ) {
     /** One glyph, as a distance field, with where its ink sits inside the tile. */
@@ -80,7 +80,7 @@ internal class ClockGlyphAtlas(
      * has no outline for, or a bitmap it could not allocate. The caller draws
      * nothing rather than drawing something wrong.
      */
-    fun glyph(character: Char): Tile? {
+    fun glyph(character: Char): Tile? = synchronized(this) {
         glyphs[character]?.let { return it }
         val tile = buildGlyph(character) ?: return null
         glyphs[character] = tile
@@ -91,7 +91,7 @@ internal class ClockGlyphAtlas(
      * The field for a whole line of text — the date, which is laid out as one
      * piece rather than per character because nothing animates within it.
      */
-    fun run(text: String): Tile? {
+    fun run(text: String): Tile? = synchronized(this) {
         runs[text]?.let { return it }
         // Only ever a handful (the date changes once a day, and the format on
         // a locale change), but a clock that runs for months should not grow a
@@ -102,12 +102,11 @@ internal class ClockGlyphAtlas(
         return tile
     }
 
-    fun release() {
-        glyphs.values.forEach { it.bitmap.recycle() }
-        glyphs.clear()
-        runs.values.forEach { it.bitmap.recycle() }
-        runs.clear()
-    }
+    // No release: the atlases are shared and live for the process. There are
+    // only ever as many as there are faces, each about a megabyte, and the
+    // alternative — one per renderer, rebuilt on every preview and every
+    // thumbnail — is the same megabyte several times over plus the transform
+    // that produced it.
 
     private fun configurePaint(em: Float, stretched: Boolean) {
         paint.typeface = style.typeface()
@@ -248,6 +247,19 @@ internal class ClockGlyphAtlas(
     }
 
     companion object {
+        private val shared = HashMap<ClockStyle, ClockGlyphAtlas>()
+
+        /**
+         * The atlas for [style], built once for the whole process.
+         *
+         * The wallpaper renderer, the calibration preview and the style
+         * thumbnails all want the same fields; building them per renderer
+         * meant running the distance transform five times over for one clock.
+         */
+        fun of(style: ClockStyle): ClockGlyphAtlas = synchronized(shared) {
+            shared.getOrPut(style) { ClockGlyphAtlas(style) }
+        }
+
         /**
          * Em the tiles are rasterised at. Only the shape's fidelity depends on
          * it — the field itself is scale-free — so this trades a megabyte of
