@@ -362,6 +362,10 @@ class ClockFaceRenderer(private val context: Context) {
     private var currentRows: List<String> = emptyList()
     private var previousRows: List<String> = emptyList()
 
+    /** True when the last frame could not draw every glyph it wanted. */
+    private var incomplete: Boolean = false
+    private var incompleteRetries: Int = 0
+
     private var lastRenderedKey: Long = Long.MIN_VALUE
     private var lastRenderUptimeMs: Long = 0L
     private var transitionStartUptimeMs: Long = NO_TRANSITION
@@ -401,7 +405,7 @@ class ClockFaceRenderer(private val context: Context) {
     }
 
     fun isAnimating(uptimeMs: Long): Boolean =
-        isEntering(uptimeMs) || isChangingDigits(uptimeMs)
+        incomplete || isEntering(uptimeMs) || isChangingDigits(uptimeMs)
 
     /**
      * True only while the entry animation is running. Separate from
@@ -465,9 +469,25 @@ class ClockFaceRenderer(private val context: Context) {
         val target2d = canvas ?: return null
 
         target.eraseColor(Color.TRANSPARENT)
-        drawFace(target2d, face, uptimeMs)
+        // A glyph whose field has not been built yet cannot be drawn, and the
+        // time will not change again for a minute — so without this the face
+        // would sit there missing a digit until some unrelated setting forced
+        // a redraw, which is exactly what it used to do on the first frame.
+        // Leaving the key unstamped makes the next call render again, and
+        // reporting it as animating is what asks for that call.
+        if (drawFace(target2d, face, uptimeMs)) {
+            incomplete = false
+            incompleteRetries = 0
+        } else {
+            // Bounded: a field that cannot be built at all — no memory for it,
+            // no outline for the character — would otherwise have the clock
+            // redrawing at frame rate for ever trying to finish a face that
+            // never will.
+            incompleteRetries++
+            incomplete = incompleteRetries <= MAX_INCOMPLETE_RETRIES
+        }
 
-        lastRenderedKey = key
+        lastRenderedKey = if (incomplete) Long.MIN_VALUE else key
         lastRenderUptimeMs = uptimeMs
         width = target.width
         height = target.height
@@ -529,6 +549,7 @@ class ClockFaceRenderer(private val context: Context) {
      * displayed time has not actually changed.
      */
     fun invalidate() {
+        incompleteRetries = 0
         lastRenderedKey = Long.MIN_VALUE
         transitionStartUptimeMs = NO_TRANSITION
         entryStartUptimeMs = NO_TRANSITION
@@ -549,11 +570,12 @@ class ClockFaceRenderer(private val context: Context) {
 
     // ---------------------------------------------------------------- draw
 
-    private fun drawFace(target: Canvas, face: FaceLayout, uptimeMs: Long) {
+    /** Returns false when a glyph's field was not ready and was left out. */
+    private fun drawFace(target: Canvas, face: FaceLayout, uptimeMs: Long): Boolean {
         val progress = transitionProgress(uptimeMs)
         val entry = entryProgress(uptimeMs)
-        drawDate(target, face, entry)
-        drawStackSeparator(target, face, entry)
+        var complete = drawDate(target, face, entry)
+        if (!drawStackSeparator(target, face, entry)) complete = false
         val rowCount = face.rows.size
         // Slots are staggered across the whole face, not per row, so a
         // stacked clock cascades down as well as across instead of both rows
@@ -602,7 +624,7 @@ class ClockFaceRenderer(private val context: Context) {
                 }
 
                 if (outgoing == null || slotProgress == null) {
-                    drawGlyph(
+                    if (!drawGlyph(
                         target = target,
                         character = newChar,
                         centerX = centerX,
@@ -613,67 +635,85 @@ class ClockFaceRenderer(private val context: Context) {
                         scale = 1f,
                         entry = entrySlot
                     )
+                    ) {
+                        complete = false
+                    }
                 } else {
                     val eased = easeOutCubic(slotProgress)
                     val shift = face.textSize * TRANSITION_TRAVEL_EM
                     // Outgoing digit rises and fades; incoming rises into
                     // place from below. Scale is nudged so the swap reads as
                     // depth rather than a flat slide.
-                    drawGlyph(
-                        target = target,
-                        character = outgoing,
-                        centerX = centerX,
-                        baseline = baseline,
-                        face = face,
-                        alpha = 1f - eased,
-                        offsetY = -shift * eased,
-                        scale = 1f - 0.10f * eased,
-                        entry = entrySlot
-                    )
-                    drawGlyph(
-                        target = target,
-                        character = newChar,
-                        centerX = centerX,
-                        baseline = baseline,
-                        face = face,
-                        alpha = eased,
-                        offsetY = shift * (1f - eased),
-                        scale = 0.90f + 0.10f * eased,
-                        entry = entrySlot
-                    )
+                    if (!drawGlyph(
+                            target = target,
+                            character = outgoing,
+                            centerX = centerX,
+                            baseline = baseline,
+                            face = face,
+                            alpha = 1f - eased,
+                            offsetY = -shift * eased,
+                            scale = 1f - 0.10f * eased,
+                            entry = entrySlot
+                        )
+                    ) {
+                        complete = false
+                    }
+                    if (!drawGlyph(
+                            target = target,
+                            character = newChar,
+                            centerX = centerX,
+                            baseline = baseline,
+                            face = face,
+                            alpha = eased,
+                            offsetY = shift * (1f - eased),
+                            scale = 0.90f + 0.10f * eased,
+                            entry = entrySlot
+                        )
+                    ) {
+                        complete = false
+                    }
                 }
                 target.restore()
                 x += slot.advance
                 globalSlot++
             }
         }
+        return complete
     }
 
     /**
-     * The colon between the two halves of a stacked face.
+     * The separator between the two halves of a stacked face.
      *
-     * A single row carries its separator inline; a stacked one has nowhere to
-     * put it but the gap between the rows, which is sized for it.
+     * A single row carries its colon inline. Stacked, the same two dots lie
+     * side by side in the gap between the rows — a colon turned on its side,
+     * which is what a separator between things stacked vertically has to be.
+     * It is the face's own colon rotated rather than a pair of drawn circles,
+     * so its dots are the size and spacing the typeface gives them (and a
+     * rotation leaves a distance field measuring distance).
      */
-    private fun drawStackSeparator(target: Canvas, face: FaceLayout, entry: Float?) {
-        val centreY = face.separatorY ?: return
-        val tile = atlas.glyph(':') ?: return
-        val inkHeight = max(tile.inkBottom - tile.inkTop, 1f)
-        val scale = face.separatorHeight / inkHeight
-        if (scale <= 0f) return
+    private fun drawStackSeparator(target: Canvas, face: FaceLayout, entry: Float?): Boolean {
+        val centreY = face.separatorY ?: return true
+        val tile = atlas.glyph(':') ?: return false
         val progress = entry?.let { easeOutCubic((staggeredEntry(it, 0) * 1.35f).coerceAtMost(1f)) }
             ?: 1f
-        if (progress <= 0.004f) return
-        val spread = ClockGlyphAtlas.SPREAD_EM * ClockGlyphAtlas.CANONICAL_EM
+        if (progress <= 0.004f) return true
+        val scale = face.glyphScale * STACK_SEPARATOR_SCALE
+        if (scale <= 0f) return true
+        val inkCentreX = (tile.inkLeft + tile.inkRight) / 2f
+        val inkCentreY = (tile.inkTop + tile.inkBottom) / 2f
         glyphMatrix.reset()
         glyphMatrix.setScale(scale, scale)
+        // A quarter turn about the origin sends (x, y) to (-y, x), so the
+        // translation that follows puts the ink's centre where it belongs.
+        glyphMatrix.postRotate(90f)
         glyphMatrix.postTranslate(
-            face.digitsLeft + face.digitsWidth / 2f - (tile.advance / 2f + spread) * scale,
-            centreY - (tile.inkTop + inkHeight / 2f) * scale
+            face.digitsLeft + face.digitsWidth / 2f + inkCentreY * scale,
+            centreY - inkCentreX * scale
         )
         tilePaint.color = color
         tilePaint.alpha = erosionAlpha(progress)
         target.drawBitmap(tile.bitmap, glyphMatrix, tilePaint)
+        return true
     }
 
     /**
@@ -684,13 +724,13 @@ class ClockFaceRenderer(private val context: Context) {
      * old fixed-width bevel could not do, and why the date used to come out
      * in patches beside a clock that looked right.
      */
-    private fun drawDate(target: Canvas, face: FaceLayout, entry: Float?) {
-        val tile = face.dateTile ?: return
+    private fun drawDate(target: Canvas, face: FaceLayout, entry: Float?): Boolean {
+        val tile = face.dateTile ?: return true
         // Arrives with the first glyph rather than on its own schedule, so the
         // face reads as one thing coming into place.
         val progress = entry?.let { easeOutCubic((staggeredEntry(it, 0) * 1.35f).coerceAtMost(1f)) }
             ?: 1f
-        if (progress <= 0.004f) return
+        if (progress <= 0.004f) return true
         val spread = ClockGlyphAtlas.SPREAD_EM * ClockGlyphAtlas.RUN_EM
         val inkHeight = max(tile.inkBottom - tile.inkTop, 1f)
         val scaleX = face.dateWidth / max(tile.advance, 1f)
@@ -704,6 +744,7 @@ class ClockFaceRenderer(private val context: Context) {
         tilePaint.color = color
         tilePaint.alpha = erosionAlpha(progress * DATE_OPACITY)
         target.drawBitmap(tile.bitmap, glyphMatrix, tilePaint)
+        return true
     }
 
     /**
@@ -722,14 +763,14 @@ class ClockFaceRenderer(private val context: Context) {
         offsetY: Float,
         scale: Float,
         entry: Float?
-    ) {
+    ): Boolean {
         // Alpha leads the motion slightly: a glyph that is still travelling
         // but already solid reads as arriving, where one that fades in on the
         // same curve as it moves reads as sluggish.
         val entryAlpha = entry?.let { easeOutCubic((it * 1.35f).coerceAtMost(1f)) } ?: 1f
         val clamped = (alpha * entryAlpha).coerceIn(0f, 1f)
-        if (clamped <= 0.004f) return
-        val tile = atlas.glyph(character) ?: return
+        if (clamped <= 0.004f) return true
+        val tile = atlas.glyph(character) ?: return false
 
         val entryRise = entry?.let {
             face.textSize * ENTRY_RISE_EM * (1f - easeOutQuint(it))
@@ -752,6 +793,7 @@ class ClockFaceRenderer(private val context: Context) {
         tilePaint.color = color
         tilePaint.alpha = erosionAlpha(clamped)
         target.drawBitmap(tile.bitmap, glyphMatrix, tilePaint)
+        return true
     }
 
     /**
@@ -986,7 +1028,6 @@ class ClockFaceRenderer(private val context: Context) {
             } else {
                 null
             },
-            separatorHeight = rowGap * STACK_SEPARATOR_FRACTION,
             contentAspect = contentAspect,
             dateText = dateText,
             dateBox = dateBox,
@@ -1197,7 +1238,6 @@ class ClockFaceRenderer(private val context: Context) {
         val bitmapHeight: Float,
         /** Where the stacked separator's centre goes; null on a single row. */
         val separatorY: Float?,
-        val separatorHeight: Float,
         val contentAspect: Float,
         val dateText: String?,
         /** The date's box this layout was built for; a new one means a new layout. */
@@ -1264,9 +1304,12 @@ class ClockFaceRenderer(private val context: Context) {
          * The gap between the two rows of a stacked face, as a fraction of
          * the em. Sized for the separator that sits in it.
          */
-        const val STACK_GAP_EM = 0.30f
-        /** How much of that gap the separator's own ink fills. */
-        const val STACK_SEPARATOR_FRACTION = 0.62f
+        const val STACK_GAP_EM = 0.24f
+        /** How many frames a face may fail to finish before it is accepted. */
+        const val MAX_INCOMPLETE_RETRIES = 4
+
+        /** The separator's size relative to a digit's. */
+        const val STACK_SEPARATOR_SCALE = 0.62f
         /**
          * Smallest the whole face may be rasterised at, whatever the date's
          * placement asks for. Below this the digits would be visibly soft.

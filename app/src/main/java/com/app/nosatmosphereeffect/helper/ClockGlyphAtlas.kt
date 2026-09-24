@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.Typeface
+import android.util.Log
 import androidx.core.graphics.createBitmap
 import java.nio.ByteBuffer
 import kotlin.math.ceil
@@ -55,7 +56,9 @@ internal class ClockGlyphAtlas private constructor(
         /** The glyph's own advance, for laying the row out. */
         val advance: Float,
         /** The ink box inside the tile, in tile pixels. */
+        val inkLeft: Float,
         val inkTop: Float,
+        val inkRight: Float,
         val inkBottom: Float
     ) {
         val width: Float get() = bitmap.width.toFloat()
@@ -82,7 +85,14 @@ internal class ClockGlyphAtlas private constructor(
      */
     fun glyph(character: Char): Tile? = synchronized(this) {
         glyphs[character]?.let { return it }
-        val tile = buildGlyph(character) ?: return null
+        val tile = buildGlyph(character)
+        if (tile == null) {
+            // The caller draws nothing and asks for another frame, so this is
+            // recoverable — but it is also the only way a digit can go missing
+            // from an otherwise working clock, so it says so.
+            Log.w(TAG, "No field could be built for '$character'")
+            return null
+        }
         glyphs[character] = tile
         return tile
     }
@@ -144,7 +154,9 @@ internal class ClockGlyphAtlas private constructor(
                 bitmap = bitmap,
                 baseline = baseline,
                 advance = advance,
+                inkLeft = spread + ink.left,
                 inkTop = baseline + ink.top * stretch,
+                inkRight = spread + ink.right,
                 inkBottom = baseline + ink.bottom * stretch
             )
         }
@@ -175,7 +187,9 @@ internal class ClockGlyphAtlas private constructor(
                 bitmap = bitmap,
                 baseline = baseline,
                 advance = advance,
+                inkLeft = spread + ink.left,
                 inkTop = baseline + ink.top,
+                inkRight = spread + ink.right,
                 inkBottom = baseline + ink.bottom
             )
         }
@@ -281,6 +295,7 @@ internal class ClockGlyphAtlas private constructor(
         /** Matches ClockFaceRenderer's date tracking, so the tile measures the same. */
         private const val DATE_TRACKING_EM = 0.02f
 
+        private const val TAG = "ClockGlyphAtlas"
         private const val MAX_RUNS = 8
         private const val MAX_TILE_PIXELS = 4_000_000L
     }
