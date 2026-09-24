@@ -120,8 +120,9 @@ class GlesClockOverlay(
             pendingState = null
             appliedState = next
             provider.style = next.style
-            provider.showSeconds = next.showSeconds
             provider.showDate = next.showDate
+            provider.clockPlacement = next.placement
+            provider.datePlacement = next.datePlacement
             provider.animateDigits = next.animate
             provider.animateEntry = next.animate
             provider.color = next.color
@@ -144,6 +145,15 @@ class GlesClockOverlay(
             provider.beginEntry()
         }
 
+        val safeAspect = if (screenAspect.isFinite() && screenAspect > 0f) {
+            screenAspect
+        } else {
+            1f
+        }
+        // Set before the face is rendered: the date's position is measured in
+        // digit-box widths, so the face has to know the shape of the screen it
+        // is being placed on.
+        provider.screenAspect = safeAspect
         val ready = opacity > 0f &&
             provider.ensureUpToDate(textureUnit) &&
             provider.textureId != 0
@@ -173,24 +183,21 @@ class GlesClockOverlay(
             return
         }
 
-        // Height is a fraction of screen height; width follows from the face's
-        // own pixel aspect, divided by the screen aspect so glyphs are not
-        // stretched. The user's per-axis stretch is already folded into both
-        // numbers — see ClockOverlayState.renderHeight.
-        val heightUv = current.renderHeight
-        val safeAspect = if (screenAspect.isFinite() && screenAspect > 0f) {
-            screenAspect
-        } else {
-            1f
-        }
-        val widthUv =
-            heightUv * current.renderTextureAspect(provider.aspectRatio) / safeAspect
+        // The stored placement describes the digits; the bitmap around them
+        // carries the animation margin and, when it is on, the date. Asking
+        // the face where its digits are is what keeps the clock exactly where
+        // the user put it whatever else the bitmap has to hold.
+        val texture = ClockBoxPlacement.textureBox(
+            placement = current.placement,
+            face = provider.faceBox,
+            screenAspect = safeAspect
+        )
         GLES30.glUniform4f(
             GLES30.glGetUniformLocation(programId, "uClockRect"),
-            current.centerX - widthUv / 2f,
-            current.renderTop,
-            widthUv,
-            heightUv
+            texture.left,
+            texture.top,
+            texture.width,
+            texture.height
         )
         GLES30.glUniform1f(
             GLES30.glGetUniformLocation(programId, "uClockOpacity"),

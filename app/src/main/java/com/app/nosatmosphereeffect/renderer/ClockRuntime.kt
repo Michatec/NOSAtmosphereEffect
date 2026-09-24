@@ -60,7 +60,7 @@ class ClockRuntime(
         val resolved = state.copy(
             color = ClockPalette.resolve(state.requestedColor, resolvedAutoColor)
         ).sanitized()
-        pump.configure(resolved.enabled, resolved.showSeconds)
+        pump.configure(resolved.enabled)
         if (resolved.enabled && ClockPalette.isAuto(requestedColor)) {
             refreshAutoColor()
         }

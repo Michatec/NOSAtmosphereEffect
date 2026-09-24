@@ -74,8 +74,7 @@ internal class VulkanFrostedHost(
         if (!changed) return
         updateEffectState { state ->
             state.copy(
-                clock = state.clock.copy(
-                    textureAspect = clockOverlay.aspectRatio,
+                clock = clockOverlay.withFaceMetrics(state.clock).copy(
                     faceUploaded = true
                 )
             ).sanitized()
@@ -93,12 +92,7 @@ internal class VulkanFrostedHost(
         clockOverlay.applyState(clock)
         updateEffectState { current ->
             current.copy(
-                clock = clock.copy(
-                    textureAspect = if (clockOverlay.hasUploadedFace) {
-                        clockOverlay.aspectRatio
-                    } else {
-                        current.clock.textureAspect
-                    },
+                clock = clockOverlay.withFaceMetrics(clock, current.clock).copy(
                     faceUploaded = clockOverlay.hasUploadedFace && clock.enabled
                 )
             ).sanitized()

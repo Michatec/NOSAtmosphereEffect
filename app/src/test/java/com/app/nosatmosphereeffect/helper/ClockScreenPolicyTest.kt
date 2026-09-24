@@ -293,10 +293,26 @@ class ClockFaceGeometryTest {
         // Both still need a floor, or a face would read as a caption sitting
         // where a clock should be.
         ClockStyle.entries.forEach { style ->
-            assertTrue(
-                "${style.id} should be a glass face",
+            // The typeface faces are glass; the drawn ones are solid, and
+            // dimming the minutes is theirs alone — a glass face's colour is
+            // the wallpaper showing through, which there is nothing to dim.
+            assertEquals(
+                "${style.id} disagrees about being glass",
+                !style.drawsSegments,
                 style.liquidGlass
             )
+            assertTrue(
+                "${style.id} has an out-of-range minute dimming",
+                style.minuteDim in 0.4f..1f
+            )
+            if (style.liquidGlass) {
+                assertEquals(
+                    "${style.id} is glass, so its minutes cannot be dimmed",
+                    1f,
+                    style.minuteDim,
+                    0f
+                )
+            }
             assertTrue(
                 "${style.id} has an out-of-range horizontal scale",
                 style.horizontalScale in 0.8f..1f

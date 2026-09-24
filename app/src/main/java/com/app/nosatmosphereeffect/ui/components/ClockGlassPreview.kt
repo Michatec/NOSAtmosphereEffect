@@ -46,6 +46,11 @@ internal fun ClockGlassPreview(
     /** Where the face goes, as fractions of this view. */
     box: ClockBoxRect,
     opacity: Float,
+    /**
+     * False for the solid faces, which are drawn as they are rather than as
+     * something the wallpaper refracts through.
+     */
+    glass: Boolean,
     /** Changes whenever [face] has been redrawn in place. */
     faceRevision: Int,
     modifier: Modifier = Modifier
@@ -104,7 +109,8 @@ internal fun ClockGlassPreview(
         val boxTop = box.top * viewHeight
         val boxWidth = box.width * viewWidth
         val boxHeight = box.height * viewHeight
-        val drawGlass = shader != null &&
+        val drawGlass = glass &&
+            shader != null &&
             faceShader != null &&
             glyphs != null &&
             boxWidth > 1f &&
@@ -114,9 +120,13 @@ internal fun ClockGlassPreview(
         if (!drawGlass) {
             paint.shader = wallpaperShader
             drawIntoCanvas { it.nativeCanvas.drawRect(0f, 0f, viewWidth, viewHeight, paint) }
-            // Without the runtime shader the glass cannot be drawn, but the
-            // clock still has to be visible to be positioned.
-            if (shader == null && glyphs != null && opacity > 0f && boxWidth > 1f) {
+            // Either the face is solid, or the runtime shader is unavailable
+            // and the clock still has to be visible to be positioned.
+            if ((!glass || shader == null) &&
+                glyphs != null &&
+                opacity > 0f &&
+                boxWidth > 1f
+            ) {
                 drawImage(
                     image = glyphs.asImageBitmap(),
                     dstOffset = IntOffset(boxLeft.toInt(), boxTop.toInt()),

@@ -183,13 +183,12 @@ class EffectPreviewService(
     }
 
     /**
-     * Pushes face settings (style, seconds, animation, colour) to the live
+     * Pushes face settings (style, date, animation, colour) to the live
      * preview. Separate from the geometry call because these change the
      * rendered bitmap rather than how the shader places it.
      */
     fun setClockFace(
         styleId: String,
-        showSeconds: Boolean,
         animate: Boolean,
         color: Int,
         hourFormat: String
@@ -198,7 +197,6 @@ class EffectPreviewService(
             current.copy(
                 enabled = true,
                 styleId = styleId,
-                showSeconds = showSeconds,
                 animate = animate,
                 requestedColor = color,
                 color = color,
@@ -376,6 +374,7 @@ class EffectPreviewService(
                     ),
                     singleImageMode = !PlaylistModeManager.isPlaylistMode(appContext)
                 )
+                val clockPlacement = ClockPreferences.readPlacement(prefs)
                 EffectPreviewRenderState.Atmosphere(
                     AtmosphereRenderState(
                         dimLevel = previewFloat(prefs, "dim_level", 0.2f),
@@ -400,11 +399,6 @@ class EffectPreviewService(
                             AtmosphereClockPolicy.STYLE_KEY,
                             ClockStyle.DEFAULT.id
                         ),
-                        clockShowSeconds = previewBoolean(
-                            prefs,
-                            AtmosphereClockPolicy.SECONDS_KEY,
-                            AtmosphereClockPolicy.DEFAULT_SECONDS
-                        ),
                         clockShowDate = previewBoolean(
                             prefs,
                             AtmosphereClockPolicy.DATE_KEY,
@@ -415,31 +409,35 @@ class EffectPreviewService(
                             AtmosphereClockPolicy.ANIMATE_KEY,
                             AtmosphereClockPolicy.DEFAULT_ANIMATE
                         ),
-                        clockCenterX = previewFloat(
+                        // Through the shared reader so a placement stored
+                        // before the geometry change is converted here too.
+                        clockCenterX = clockPlacement.centerX,
+                        clockTop = clockPlacement.top,
+                        clockHeight = clockPlacement.height,
+                        clockWidthScale = clockPlacement.widthScale,
+                        clockDateCenterX = previewFloat(
                             prefs,
-                            AtmosphereClockPolicy.CENTER_X_KEY,
-                            AtmosphereClockPolicy.DEFAULT_CENTER_X
+                            AtmosphereClockPolicy.DATE_CENTER_X_KEY,
+                            AtmosphereClockPolicy.DEFAULT_DATE_CENTER_X
                         ),
-                        clockTop = previewFloat(
+                        clockDateTop = previewFloat(
                             prefs,
-                            AtmosphereClockPolicy.TOP_KEY,
-                            AtmosphereClockPolicy.DEFAULT_TOP
+                            AtmosphereClockPolicy.DATE_TOP_KEY,
+                            AtmosphereClockPolicy.DEFAULT_DATE_TOP
                         ),
-                        clockHeight = previewFloat(
+                        clockDateHeight = previewFloat(
                             prefs,
-                            AtmosphereClockPolicy.HEIGHT_KEY,
-                            AtmosphereClockPolicy.DEFAULT_HEIGHT
+                            AtmosphereClockPolicy.DATE_HEIGHT_KEY,
+                            AtmosphereClockPolicy.DEFAULT_DATE_HEIGHT
                         ),
-                        clockWidthScale = previewFloat(
+                        clockDateWidthScale = previewFloat(
                             prefs,
-                            AtmosphereClockPolicy.WIDTH_SCALE_KEY,
-                            AtmosphereClockPolicy.DEFAULT_WIDTH_SCALE
+                            AtmosphereClockPolicy.DATE_WIDTH_SCALE_KEY,
+                            AtmosphereClockPolicy.DEFAULT_DATE_WIDTH_SCALE
                         ),
-                        clockHeightScale = previewFloat(
-                            prefs,
-                            AtmosphereClockPolicy.HEIGHT_SCALE_KEY,
-                            AtmosphereClockPolicy.DEFAULT_HEIGHT_SCALE
-                        ),
+                        // Always 1: readPlacement folded any stored stretch
+                        // into the placement above.
+                        clockHeightScale = 1f,
                         clockOpacity = previewFloat(
                             prefs,
                             AtmosphereClockPolicy.OPACITY_KEY,
@@ -722,14 +720,10 @@ class EffectPreviewService(
                 renderer.clockEnabled = value.clockEnabled
                 renderer.clockDepthEnabled = value.clockDepthEnabled
                 renderer.clockStyle = value.clockStyle
-                renderer.clockShowSeconds = value.clockShowSeconds
                 renderer.clockShowDate = value.clockShowDate
                 renderer.clockAnimate = value.clockAnimate
                 renderer.clockColor = value.clockColor
                 renderer.clockHourFormat = value.clockHourFormat
-                renderer.clockCenterX = value.clockCenterX
-                renderer.clockTop = value.clockTop
-                renderer.clockHeight = value.clockHeight
                 renderer.clockLayout = value.clockOverlay()
                 renderer.clockOpacity = value.clockOpacity
                 renderer.clockScreen = value.clockScreen

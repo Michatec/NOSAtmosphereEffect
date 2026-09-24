@@ -11,7 +11,10 @@ import androidx.core.graphics.createBitmap
 import java.util.Calendar
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.pow
+import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 /**
  * How a face's digits are produced.
@@ -104,7 +107,14 @@ enum class ClockStyle(
     /** Segment faces: 0 leaves the segments square, 1 makes them capsules. */
     val segmentRounding: Float = 1f,
     /** Segment faces: space between digits as a fraction of their height. */
-    val segmentGap: Float = 0.12f
+    val segmentGap: Float = 0.12f,
+    /**
+     * How much dimmer the minutes are drawn than the hours, 1 leaving them
+     * the same. Solid faces use this to separate the two halves of the time
+     * the way a lock screen does; it rides on whatever colour is chosen, so a
+     * tint still reads as one colour.
+     */
+    val minuteDim: Float = 1f
 ) {
     /**
      * Hours and minutes side by side. Ids are kept as "liquid_glass" so the
@@ -151,10 +161,10 @@ enum class ClockStyle(
      * Hours over minutes as capsule segments, the shape a segment display
      * takes when its elements are fully rounded.
      */
-    GLASS_SEGMENT(
+    SEGMENT(
         id = "glass_segment",
-        label = "Glass Segment",
-        description = "Rounded segment digits, hours above minutes",
+        label = "Segment",
+        description = "Solid rounded segments, dimmed minutes",
         familyName = "sans-serif-black",
         weight = 900,
         letterSpacingEm = 0f,
@@ -162,23 +172,26 @@ enum class ClockStyle(
         separatorAlpha = 0f,
         verticalStretch = 1f,
         horizontalScale = 1f,
-        liquidGlass = true,
+        // Solid, not glass: these read as lit segments rather than as
+        // something the wallpaper shows through.
+        liquidGlass = false,
         digitShape = ClockDigitShape.PILL_SEGMENT,
         usesSeparator = false,
         segmentAspect = 0.70f,
         segmentThickness = 0.235f,
         segmentRounding = 1f,
-        segmentGap = 0.16f
+        segmentGap = 0.16f,
+        minuteDim = 0.62f
     ),
 
     /**
      * All four digits in one row, drawn thick and tight so they read as a
      * single band across the wallpaper.
      */
-    GLASS_BLOCK(
+    BLOCK(
         id = "glass_block",
-        label = "Glass Block",
-        description = "Heavy segment digits in one row",
+        label = "Block",
+        description = "Solid heavy digits in one row",
         familyName = "sans-serif-black",
         weight = 900,
         letterSpacingEm = 0f,
@@ -186,7 +199,8 @@ enum class ClockStyle(
         separatorAlpha = 0f,
         verticalStretch = 1f,
         horizontalScale = 1f,
-        liquidGlass = true,
+        // Solid and evenly weighted across every digit.
+        liquidGlass = false,
         digitShape = ClockDigitShape.BLOCK_SEGMENT,
         usesSeparator = false,
         segmentAspect = 0.78f,
@@ -219,6 +233,36 @@ enum class ClockStyle(
             return entries.firstOrNull { it.id == id } ?: DEFAULT
         }
     }
+}
+
+/**
+ * The surface a live wallpaper fills, as width/height. Used as the default
+ * [ClockFaceRenderer.screenAspect]: the wallpaper is always the display, and
+ * only the calibration screen — which draws into a smaller view — has to say
+ * otherwise.
+ */
+private fun displaySize(context: Context): Pair<Int, Int> {
+    val metrics = try {
+        context.getSystemService(android.view.WindowManager::class.java)
+            ?.currentWindowMetrics
+            ?.bounds
+    } catch (_: RuntimeException) {
+        null
+    }
+    val width = metrics?.width() ?: context.resources.displayMetrics.widthPixels
+    val height = metrics?.height() ?: context.resources.displayMetrics.heightPixels
+    return width to height
+}
+
+private fun displayAspect(context: Context): Float {
+    val (width, height) = displaySize(context)
+    if (width <= 0 || height <= 0) return 0.46f
+    return width.toFloat() / height.toFloat()
+}
+
+private fun displayHeightPx(context: Context): Float {
+    val height = displaySize(context).second
+    return if (height > 0) height.toFloat() else 2400f
 }
 
 /**
@@ -265,7 +309,8 @@ class ClockFaceRenderer(private val context: Context) {
             }
         }
 
-    var showSeconds: Boolean = false
+    /** Draws the day and date, wherever [datePlacement] puts it. */
+    var showDate: Boolean = false
         set(value) {
             if (field != value) {
                 field = value
@@ -273,12 +318,44 @@ class ClockFaceRenderer(private val context: Context) {
             }
         }
 
-    /** Draws the day and date above the digits, as the lock screen does. */
-    var showDate: Boolean = false
+    /**
+     * Where the digits sit on screen. Not used to draw them — the shader does
+     * the placing — but the date is positioned against this box, so the face
+     * has to know it.
+     */
+    var clockPlacement: ClockPlacement = AtmosphereClockPolicy.DEFAULT_PLACEMENT
         set(value) {
             if (field != value) {
                 field = value
-                invalidateLayout()
+                if (showDate) invalidateDateLayout()
+            }
+        }
+
+    /** Where the date sits on screen, set and stored exactly like the clock. */
+    var datePlacement: ClockPlacement = AtmosphereClockPolicy.DEFAULT_DATE_PLACEMENT
+        set(value) {
+            if (field != value) {
+                field = value
+                if (showDate) invalidateDateLayout()
+            }
+        }
+
+    /**
+     * Width/height of the surface the clock is drawn on. Only the date needs
+     * it: its offset from the digits is a horizontal distance measured in
+     * digit-box widths, and converting between the two needs to know how wide
+     * a screen-height fraction is.
+     *
+     * Defaults to the display, which is what a live wallpaper always fills.
+     * The calibration screen overrides it with its own preview's aspect so
+     * that what it shows is what the wallpaper will draw.
+     */
+    var screenAspect: Float = displayAspect(context)
+        set(value) {
+            val safe = if (value.isFinite() && value > 0f) value else field
+            if (field != safe) {
+                field = safe
+                if (showDate) invalidateDateLayout()
             }
         }
 
@@ -350,7 +427,11 @@ class ClockFaceRenderer(private val context: Context) {
         textAlign = Paint.Align.LEFT
     }
 
-    /** The date line; a typeface even on the segment faces, which have no letters. */
+    /**
+     * The date line. It follows the clock's own style, which for the segment
+     * faces means the family they declare rather than their drawn digits —
+     * there are no letters to draw as segments.
+     */
     private val datePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         textAlign = Paint.Align.LEFT
@@ -364,6 +445,9 @@ class ClockFaceRenderer(private val context: Context) {
     private var dateFormatterLocale: java.util.Locale? = null
 
     private val calendar: Calendar = Calendar.getInstance()
+
+    /** Used to keep the rasterisation in proportion to the clock on screen. */
+    private val screenHeightPx: Float = displayHeightPx(context)
 
     private var bitmap: Bitmap? = null
     private var canvas: Canvas? = null
@@ -485,38 +569,42 @@ class ClockFaceRenderer(private val context: Context) {
     }
 
     /**
-     * Where the glyphs sit inside the face bitmap, without drawing anything.
-     * The bitmap carries generous padding for the animations; the adaptive
-     * layout needs the digits' real extent so it does not shrink the clock
-     * to keep empty padding clear of the subject.
+     * Where the digits sit inside the face bitmap, without drawing anything.
+     * The bitmap carries margin for the animations and, when the date is on,
+     * room for the date wherever it was placed; the calibration screen and
+     * the renderers both need the digits' real extent, because that is what
+     * the user positions.
      */
-    fun measureFace(nowMillis: Long): ClockFaceBox {
-        val face = ensureLayout(formatRows(nowMillis), dateText(nowMillis))
-        val bitmapWidth = face.contentWidth + face.paddingX * 2f
-        val bitmapHeight = face.contentHeight + face.paddingY * 2f
-        val glyphTop: Float
-        val glyphBottom: Float
-        if (face.drawn) {
-            glyphTop = face.paddingY
-            glyphBottom = face.paddingY + face.contentHeight
-        } else {
-            val bounds = android.graphics.Rect()
-            textPaint.getTextBounds(DIGITS_SAMPLE, 0, DIGITS_SAMPLE.length, bounds)
-            // The date, when shown, is the top of what is visible.
-            glyphTop = if (face.dateText != null) {
-                face.paddingY
-            } else {
-                face.paddingY + face.rowBaselines.first() + bounds.top * face.verticalStretch
-            }
-            glyphBottom = face.paddingY +
-                face.rowBaselines.last() + bounds.bottom * face.verticalStretch
-        }
+    fun measureFace(nowMillis: Long): ClockFaceBox =
+        boxOf(ensureLayout(formatRows(nowMillis), dateText(nowMillis)))
+
+    /**
+     * The digits' box in the layout as it stands, without building one. The
+     * render path calls this every frame to turn the stored placement into
+     * the rectangle the shader samples, so it must not allocate or relayout.
+     */
+    val faceBox: ClockFaceBox
+        get() = layout?.let(::boxOf) ?: ClockFaceBox.IDENTITY
+
+    /**
+     * The date line's natural width/height ratio in this style's typeface, or
+     * null when there is no date. The calibration screen needs it to size the
+     * date's box the way it sizes the clock's.
+     */
+    fun measureDateAspect(nowMillis: Long): Float? {
+        val text = dateText(nowMillis) ?: return null
+        return ensureLayout(formatRows(nowMillis), text).dateNaturalAspect
+    }
+
+    private fun boxOf(face: FaceLayout): ClockFaceBox {
+        val width = max(face.bitmapWidth, 1f)
+        val height = max(face.bitmapHeight, 1f)
         return ClockFaceBox(
-            aspect = bitmapWidth / bitmapHeight,
-            left = face.paddingX / bitmapWidth,
-            top = (glyphTop / bitmapHeight).coerceIn(0f, 1f),
-            right = (face.paddingX + face.contentWidth) / bitmapWidth,
-            bottom = (glyphBottom / bitmapHeight).coerceIn(0f, 1f)
+            aspect = width / height,
+            left = face.digitsLeft / width,
+            top = face.digitsTop / height,
+            right = (face.digitsLeft + face.digitsWidth) / width,
+            bottom = (face.digitsTop + face.digitsHeight) / height
         )
     }
 
@@ -563,13 +651,16 @@ class ClockFaceRenderer(private val context: Context) {
         // stacked clock cascades down as well as across instead of both rows
         // starting together.
         var globalSlot = 0
+        // Counts digits only, so the dimming lands on the same slots whether
+        // or not the face uses a separator: the first two are the hour.
+        var digitIndex = 0
 
         for (rowIndex in 0 until rowCount) {
             val row = face.rows[rowIndex]
             val previousRow = previousRows.getOrNull(rowIndex)
             val currentRow = currentRows.getOrNull(rowIndex) ?: continue
-            var x = face.paddingX + (face.contentWidth - row.width) / 2f
-            val baseline = face.paddingY + face.rowBaselines[rowIndex]
+            var x = face.digitsLeft + (face.digitsWidth - row.width) / 2f
+            val baseline = face.rowBaselines[rowIndex]
 
             for (slotIndex in row.slots.indices) {
                 val slot = row.slots[slotIndex]
@@ -581,6 +672,12 @@ class ClockFaceRenderer(private val context: Context) {
                 }
                 val centerX = x + slot.advance / 2f
                 val entrySlot = entry?.let { staggeredEntry(it, globalSlot) }
+                val dim = if (newChar == ':' || digitIndex < HOUR_DIGITS) {
+                    1f
+                } else {
+                    style.minuteDim
+                }
+                if (newChar != ':') digitIndex++
 
                 // Only a slot whose character actually changed animates, and
                 // only while a transition is running. Held in one nullable
@@ -604,7 +701,8 @@ class ClockFaceRenderer(private val context: Context) {
                         alpha = 1f,
                         offsetY = 0f,
                         scale = 1f,
-                        entry = entrySlot
+                        entry = entrySlot,
+                        dim = dim
                     )
                 } else {
                     val eased = easeOutCubic(slotProgress)
@@ -621,7 +719,8 @@ class ClockFaceRenderer(private val context: Context) {
                         alpha = 1f - eased,
                         offsetY = -shift * eased,
                         scale = 1f - 0.10f * eased,
-                        entry = entrySlot
+                        entry = entrySlot,
+                        dim = dim
                     )
                     drawGlyph(
                         target = target,
@@ -632,7 +731,8 @@ class ClockFaceRenderer(private val context: Context) {
                         alpha = eased,
                         offsetY = shift * (1f - eased),
                         scale = 0.90f + 0.10f * eased,
-                        entry = entrySlot
+                        entry = entrySlot,
+                        dim = dim
                     )
                 }
                 x += slot.advance
@@ -643,9 +743,13 @@ class ClockFaceRenderer(private val context: Context) {
 
     private fun scaleX(scale: Float, entryScale: Float): Float = scale * entryScale
 
-    /** The day and date line, centred above the digits. */
+    /**
+     * The day and date line, drawn to fill the box the user placed for it in
+     * the same typeface as the digits.
+     */
     private fun drawDate(target: Canvas, face: FaceLayout, entry: Float?) {
         val text = face.dateText ?: return
+        if (!face.drawsDate) return
         // Arrives with the first glyph rather than on its own schedule, so the
         // face reads as one thing coming into place.
         val alpha = entry?.let { easeOutCubic((staggeredEntry(it, 0) * 1.35f).coerceAtMost(1f)) }
@@ -653,13 +757,13 @@ class ClockFaceRenderer(private val context: Context) {
         if (alpha <= 0.004f) return
         datePaint.color = color
         datePaint.alpha = (alpha * DATE_OPACITY * 255f).toInt().coerceIn(0, 255)
-        val width = datePaint.measureText(text)
-        target.drawText(
-            text,
-            face.paddingX + (face.contentWidth - width) / 2f,
-            face.paddingY + face.dateBaseline,
-            datePaint
-        )
+        // Re-asserted per frame: the layout is only rebuilt when the shape
+        // changes, and any other paint user would otherwise leak into this.
+        datePaint.typeface = style.typeface()
+        datePaint.textSize = face.dateTextSize
+        datePaint.textScaleX = face.dateScaleX
+        datePaint.letterSpacing = DATE_TRACKING_EM
+        target.drawText(text, face.dateX, face.dateBaseline, datePaint)
     }
 
     /**
@@ -727,7 +831,9 @@ class ClockFaceRenderer(private val context: Context) {
         alpha: Float,
         offsetY: Float,
         scale: Float,
-        entry: Float?
+        entry: Float?,
+        /** 1 for the hour, [ClockStyle.minuteDim] for the minutes. */
+        dim: Float = 1f
     ) {
         // Alpha leads the motion slightly: a glyph that is still travelling
         // but already solid reads as arriving, where one that fades in on the
@@ -750,7 +856,10 @@ class ClockFaceRenderer(private val context: Context) {
         // focus. Free: the shadow layer is already being set per glyph.
         val bloom = entry?.let { 1f + ENTRY_BLOOM * (1f - easeOutCubic(it)) } ?: 1f
 
-        textPaint.color = color
+        // Dimming darkens the colour rather than fading it: a translucent
+        // digit would show the wallpaper through it, where what these faces
+        // want is a minute that is a darker shade of the same colour.
+        textPaint.color = dimmed(color, dim)
         textPaint.alpha = (finalAlpha * 255f).toInt().coerceIn(0, 255)
         // Re-asserted per glyph rather than trusted to persist from
         // ensureLayout: the layout is only rebuilt when the rows change, so a
@@ -810,12 +919,90 @@ class ClockFaceRenderer(private val context: Context) {
         invalidate()
     }
 
+    /**
+     * Drops the layout but keeps the bitmap, for a change that only moves the
+     * date. The bitmap is reused whenever the new layout happens to want the
+     * same size, which — because the date's box is quantised — is most frames
+     * of a drag.
+     */
+    private fun invalidateDateLayout() {
+        layout = null
+        invalidate()
+    }
+
+    /** Scales [argb]'s colour towards black, leaving its alpha alone. */
+    private fun dimmed(argb: Int, factor: Float): Int {
+        if (factor >= 0.999f) return argb
+        val scale = factor.coerceIn(0f, 1f)
+        return Color.argb(
+            Color.alpha(argb),
+            (Color.red(argb) * scale).toInt().coerceIn(0, 255),
+            (Color.green(argb) * scale).toInt().coerceIn(0, 255),
+            (Color.blue(argb) * scale).toInt().coerceIn(0, 255)
+        )
+    }
+
+    /** The date's box relative to the digits', as the layout will draw it. */
+    private fun dateBoxFor(contentAspect: Float, dateAspect: Float): ClockDateLayout =
+        ClockBoxPlacement.relativeDateBox(
+            clock = clockPlacement,
+            date = datePlacement,
+            contentAspect = contentAspect,
+            dateAspect = dateAspect,
+            screenAspect = screenAspect
+        ).quantized()
+
     private fun ensureLayout(rows: List<String>, dateText: String?): FaceLayout {
         val existing = layout
-        if (existing != null && existing.matches(rows, dateText)) return existing
+        if (existing != null && existing.matches(rows, dateText)) {
+            // Same shape; the date may still have been dragged since.
+            if (
+                dateText == null ||
+                existing.dateBox == dateBoxFor(existing.contentAspect, existing.dateNaturalAspect)
+            ) {
+                return existing
+            }
+        }
+        var built = buildLayout(rows, dateText, TEXT_SIZE_PX)
+        // Two reasons to rasterise smaller than the nominal size, both about
+        // a bitmap that is redrawn and re-uploaded whenever the face animates.
+        //
+        // The first is oversampling: the nominal size is fixed, so a small
+        // clock was being drawn at three times the pixels it is displayed at.
+        // The second is the date, which can be dragged far from the digits and
+        // makes the bitmap that has to span both of them enormous — and that
+        // is worst for exactly the small clock the first rule already shrinks.
+        val displayedHeight = clockPlacement.height * screenHeightPx
+        val nominalHeight = max(built.digitsHeight, 1f)
+        val area = built.bitmapWidth * built.bitmapHeight
+        val wanted = minOf(
+            displayedHeight * MAX_OVERSAMPLE / nominalHeight,
+            if (area > 0f) sqrt(MAX_FACE_PIXELS / area) else 1f
+        )
+        // The budget is allowed to take the face down to where the digits are
+        // drawn at about the size they are displayed, and no further: a clock
+        // blurred to fit the date's bitmap is a worse answer than a bitmap
+        // over budget, and the date can be dragged back if it matters.
+        val floor = min(1f, displayedHeight * MIN_SAMPLE / nominalHeight)
+        val scale = min(1f, max(wanted, floor))
+        if (scale < 0.99f) {
+            built = buildLayout(
+                rows = rows,
+                dateText = dateText,
+                textSize = max(TEXT_SIZE_PX * scale, MIN_TEXT_SIZE_PX)
+            )
+        }
+        layout = built
+        return built
+    }
 
+    private fun buildLayout(
+        rows: List<String>,
+        dateText: String?,
+        textSize: Float
+    ): FaceLayout {
         textPaint.typeface = style.typeface()
-        textPaint.textSize = TEXT_SIZE_PX
+        textPaint.textSize = textSize
         textPaint.letterSpacing = style.letterSpacingEm
         // Set before the advances are measured, so the slots below are sized
         // for the condensed form rather than the wide one.
@@ -827,7 +1014,7 @@ class ClockFaceRenderer(private val context: Context) {
         // digits are all one size by construction.
         var digitAdvance = 0f
         if (drawn) {
-            digitAdvance = TEXT_SIZE_PX * (style.segmentAspect + style.segmentGap)
+            digitAdvance = textSize * (style.segmentAspect + style.segmentGap)
         } else {
             for (digit in '0'..'9') {
                 digitAdvance = max(digitAdvance, textPaint.measureText(digit.toString()))
@@ -840,7 +1027,7 @@ class ClockFaceRenderer(private val context: Context) {
         // Glyphs are scaled about their baseline, so the ascent and descent
         // both grow by the stretch factor and the row box grows with them.
         // A drawn digit's box is exactly its height.
-        val rowHeight = if (drawn) TEXT_SIZE_PX else (metrics.bottom - metrics.top) * stretch
+        val rowHeight = if (drawn) textSize else (metrics.bottom - metrics.top) * stretch
         val rowLayouts = rows.map { rowText ->
             val slots = rowText.map { character ->
                 Slot(
@@ -852,43 +1039,84 @@ class ClockFaceRenderer(private val context: Context) {
 
         // The trailing gap is trimmed so the drawn faces sit tight in their box.
         val digitsWidth = (rowLayouts.maxOfOrNull { it.width } ?: digitAdvance) -
-            if (drawn) TEXT_SIZE_PX * style.segmentGap else 0f
+            if (drawn) textSize * style.segmentGap else 0f
         val rowSpacing = if (rows.size > 1) {
-            TEXT_SIZE_PX * if (drawn) SEGMENT_ROW_SPACING_EM else ROW_SPACING_EM
+            textSize * if (drawn) SEGMENT_ROW_SPACING_EM else ROW_SPACING_EM
         } else {
             0f
         }
 
-        // The date sits above the digits, in the same colour and the same
-        // texture, so it takes the glass treatment and the user's size and
-        // placement with no separate plumbing.
-        // Heavier and larger than a lock screen would set it: the glass bevel
-        // is measured in texels of this bitmap, so a hairline date would be
-        // all edge and no body once the shader has finished with it.
-        datePaint.typeface = Typeface.create(
-            Typeface.create("sans-serif-medium", Typeface.NORMAL),
-            600,
-            false
-        )
-        datePaint.textSize = TEXT_SIZE_PX * DATE_SIZE_EM
-        datePaint.letterSpacing = DATE_TRACKING_EM
-        val dateMetrics = datePaint.fontMetrics
-        val dateHeight = if (dateText == null) 0f else dateMetrics.bottom - dateMetrics.top
-        val dateGap = if (dateText == null) 0f else TEXT_SIZE_PX * DATE_GAP_EM
-        val dateWidth = if (dateText == null) 0f else datePaint.measureText(dateText)
+        // The digits' ink box. This is what the user drags, so it is measured
+        // from the glyphs themselves rather than from the font's line box:
+        // a line box includes room for accents no digit has, which made the
+        // calibration frame sit visibly loose around the clock.
+        val baselineFromInkTop: Float
+        val digitsHeight: Float
+        if (drawn) {
+            baselineFromInkTop = 0f
+            digitsHeight = rowHeight * rows.size + rowSpacing * (rows.size - 1)
+        } else {
+            val ink = android.graphics.Rect()
+            textPaint.getTextBounds(DIGITS_SAMPLE, 0, DIGITS_SAMPLE.length, ink)
+            baselineFromInkTop = -ink.top * stretch
+            digitsHeight = (rowHeight + rowSpacing) * (rows.size - 1) +
+                (ink.bottom - ink.top) * stretch
+        }
+        val contentAspect = (digitsWidth / max(digitsHeight, 1f)).coerceIn(0.02f, 50f)
 
-        val contentWidth = max(digitsWidth, dateWidth)
-        val digitsHeight = rowHeight * rows.size + rowSpacing * (rows.size - 1)
-        val contentHeight = digitsHeight + dateHeight + dateGap
+        // The date is drawn to fill its own box, in digits-local coordinates
+        // for now: (0, 0) is the digits' top-left corner.
+        var dateBox: ClockDateLayout? = null
+        var dateNaturalAspect = 1f
+        var dateTextSize = 0f
+        var dateScaleX = 1f
+        var dateX = 0f
+        var dateBaseline = 0f
+        var dateLeft = 0f
+        var dateTop = 0f
+        var dateRight = 0f
+        var dateBottom = 0f
+        var drawsDate = false
+        if (dateText != null) {
+            datePaint.typeface = style.typeface()
+            datePaint.letterSpacing = DATE_TRACKING_EM
+            datePaint.textScaleX = 1f
+            datePaint.textSize = DATE_PROBE_PX
+            val probe = android.graphics.Rect()
+            datePaint.getTextBounds(dateText, 0, dateText.length, probe)
+            val probeWidth = max(probe.width().toFloat(), 1f)
+            val probeHeight = max(probe.height().toFloat(), 1f)
+            dateNaturalAspect = probeWidth / probeHeight
+            val box = dateBoxFor(contentAspect, dateNaturalAspect)
+            dateBox = box
+            val boxWidth = box.width * digitsWidth
+            val boxHeight = box.height * digitsHeight
+            if (boxWidth >= MIN_DATE_PX && boxHeight >= MIN_DATE_PX) {
+                drawsDate = true
+                dateTextSize = DATE_PROBE_PX * boxHeight / probeHeight
+                val sizeRatio = dateTextSize / DATE_PROBE_PX
+                dateScaleX = (boxWidth / (probeWidth * sizeRatio)).coerceIn(0.2f, 5f)
+                dateLeft = box.offsetX * digitsWidth
+                dateTop = box.offsetY * digitsHeight
+                dateRight = dateLeft + boxWidth
+                dateBottom = dateTop + boxHeight
+                // Positioned by its ink, so the glyphs fill the box the user
+                // dragged rather than the font's line box doing it.
+                dateX = dateLeft - probe.left * sizeRatio * dateScaleX
+                dateBaseline = dateTop - probe.top * sizeRatio
+                datePaint.textSize = dateTextSize
+                datePaint.textScaleX = dateScaleX
+            }
+        }
 
-        // Padding leaves room for whichever animation travels furthest, plus
+        // Margin leaves room for whichever animation travels furthest, plus
         // the bloomed shadow and the scale overshoot, so a glyph mid-flight
         // is never clipped by the texture edge. Split per axis because the
         // vertical budget is much larger than the horizontal one and a shared
         // value would waste bitmap width on every upload.
         val travelEm = max(TRANSITION_TRAVEL_EM, ENTRY_RISE_EM)
         // A glass face draws no shadow, so it needs no room for one. That was
-        // most of the padding: it left the visible digits sitting inside a
+        // most of the margin: it left the visible digits sitting inside a
         // texture a third larger than they are, which both wasted upload
         // bandwidth and made the calibration box look loose around them.
         val bloomedShadowEm = if (style.liquidGlass) {
@@ -896,35 +1124,62 @@ class ClockFaceRenderer(private val context: Context) {
         } else {
             SHADOW_RADIUS_EM * (1f + ENTRY_BLOOM)
         }
-        val paddingY = TEXT_SIZE_PX *
-            (travelEm + (bloomedShadowEm + OVERSHOOT_MARGIN_EM) * stretch)
-        val paddingX = TEXT_SIZE_PX * (bloomedShadowEm + OVERSHOOT_MARGIN_EM)
+        val marginY = textSize * (travelEm + (bloomedShadowEm + OVERSHOOT_MARGIN_EM) * stretch)
+        val marginX = textSize * (bloomedShadowEm + OVERSHOOT_MARGIN_EM)
+        val dateMargin = if (drawsDate) {
+            max((dateBottom - dateTop) * DATE_MARGIN_FRACTION, 2f)
+        } else {
+            0f
+        }
 
-        // Drawn digits have no baseline, so this holds the top of the row for
-        // them and the text baseline for the typeface faces.
-        val digitsTop = dateHeight + dateGap
+        // Horizontally the bitmap stays symmetric about the digits whatever
+        // the date does: every renderer places the texture by the digits'
+        // centre line, so a lop-sided bitmap would slide the clock sideways.
+        val leftExtent = if (drawsDate) max(marginX, dateMargin - dateLeft) else marginX
+        val rightExtent = if (drawsDate) {
+            max(marginX, dateRight + dateMargin - digitsWidth)
+        } else {
+            marginX
+        }
+        val sideExtent = max(leftExtent, rightExtent)
+        val topExtent = if (drawsDate) max(marginY, dateMargin - dateTop) else marginY
+        val bottomExtent = if (drawsDate) {
+            max(marginY, dateBottom + dateMargin - digitsHeight)
+        } else {
+            marginY
+        }
+
+        val digitsLeft = sideExtent
+        val digitsTop = topExtent
         val baselines = FloatArray(rows.size)
         for (index in rows.indices) {
-            baselines[index] = digitsTop + (rowHeight + rowSpacing) * index +
-                if (drawn) 0f else -metrics.top * stretch
+            baselines[index] = digitsTop + baselineFromInkTop + (rowHeight + rowSpacing) * index
         }
 
         val face = FaceLayout(
             rows = rowLayouts,
             rowBaselines = baselines,
             rowTexts = rows,
-            contentWidth = contentWidth,
-            contentHeight = contentHeight,
+            digitsLeft = digitsLeft,
+            digitsTop = digitsTop,
+            digitsWidth = digitsWidth,
+            digitsHeight = digitsHeight,
+            bitmapWidth = digitsWidth + sideExtent * 2f,
+            bitmapHeight = digitsHeight + topExtent + bottomExtent,
             rowHeight = rowHeight,
             rowSpacing = rowSpacing,
             drawn = drawn,
-            digitWidth = TEXT_SIZE_PX * style.segmentAspect * style.horizontalScale,
+            digitWidth = textSize * style.segmentAspect * style.horizontalScale,
+            contentAspect = contentAspect,
             dateText = dateText,
-            dateBaseline = -dateMetrics.top,
-            dateHeight = dateHeight,
-            paddingX = paddingX,
-            paddingY = paddingY,
-            textSize = TEXT_SIZE_PX,
+            dateBox = dateBox,
+            dateNaturalAspect = dateNaturalAspect,
+            drawsDate = drawsDate,
+            dateTextSize = dateTextSize,
+            dateScaleX = dateScaleX,
+            dateX = digitsLeft + dateX,
+            dateBaseline = digitsTop + dateBaseline,
+            textSize = textSize,
             verticalStretch = stretch
         )
         layout = face
@@ -932,8 +1187,8 @@ class ClockFaceRenderer(private val context: Context) {
     }
 
     private fun ensureBitmap(face: FaceLayout): Bitmap? {
-        val targetWidth = (face.contentWidth + face.paddingX * 2f).toInt().coerceAtLeast(1)
-        val targetHeight = (face.contentHeight + face.paddingY * 2f).toInt().coerceAtLeast(1)
+        val targetWidth = face.bitmapWidth.roundToInt().coerceAtLeast(1)
+        val targetHeight = face.bitmapHeight.roundToInt().coerceAtLeast(1)
         val existing = bitmap
         if (
             existing != null &&
@@ -959,7 +1214,8 @@ class ClockFaceRenderer(private val context: Context) {
     // --------------------------------------------------------------- time
 
     private fun timeKey(nowMillis: Long): Long {
-        val divisor = if (showSeconds) 1_000L else 60_000L
+        // The clock never shows seconds, so a minute is the finest step.
+        val divisor = 60_000L
         // Local-offset aware so a timezone change re-renders even when the
         // UTC minute has not rolled over.
         calendar.timeInMillis = nowMillis
@@ -971,7 +1227,6 @@ class ClockFaceRenderer(private val context: Context) {
         calendar.timeInMillis = nowMillis
         val hour24 = calendar.get(Calendar.HOUR_OF_DAY)
         val minute = calendar.get(Calendar.MINUTE)
-        val second = calendar.get(Calendar.SECOND)
 
         // Always two digits, in both formats. A bare "1:30" is a digit
         // narrower than "12:30", and because the face is centred on screen
@@ -987,23 +1242,10 @@ class ClockFaceRenderer(private val context: Context) {
         val minuteText = twoDigits(minute)
 
         return if (style.stacked) {
-            if (showSeconds) {
-                listOf(hourText, minuteText, twoDigits(second))
-            } else {
-                listOf(hourText, minuteText)
-            }
+            listOf(hourText, minuteText)
         } else {
             val separator = if (style.usesSeparator) ":" else ""
-            val single = buildString {
-                append(hourText)
-                append(separator)
-                append(minuteText)
-                if (showSeconds) {
-                    append(separator)
-                    append(twoDigits(second))
-                }
-            }
-            listOf(single)
+            listOf(hourText + separator + minuteText)
         }
     }
 
@@ -1127,19 +1369,30 @@ class ClockFaceRenderer(private val context: Context) {
 
     private class FaceLayout(
         val rows: List<RowLayout>,
+        /** Absolute in the bitmap: the row top for drawn faces, the text baseline otherwise. */
         val rowBaselines: FloatArray,
         val rowTexts: List<String>,
-        val contentWidth: Float,
-        val contentHeight: Float,
+        /** The digits' ink box inside the bitmap, in pixels. */
+        val digitsLeft: Float,
+        val digitsTop: Float,
+        val digitsWidth: Float,
+        val digitsHeight: Float,
+        val bitmapWidth: Float,
+        val bitmapHeight: Float,
         val rowHeight: Float,
         val rowSpacing: Float,
         val drawn: Boolean,
         val digitWidth: Float,
+        val contentAspect: Float,
         val dateText: String?,
+        /** The date's box this layout was built for; a new one means a new layout. */
+        val dateBox: ClockDateLayout?,
+        val dateNaturalAspect: Float,
+        val drawsDate: Boolean,
+        val dateTextSize: Float,
+        val dateScaleX: Float,
+        val dateX: Float,
         val dateBaseline: Float,
-        val dateHeight: Float,
-        val paddingX: Float,
-        val paddingY: Float,
         val textSize: Float,
         val verticalStretch: Float
     ) {
@@ -1148,9 +1401,12 @@ class ClockFaceRenderer(private val context: Context) {
          * of rows and same slot pattern. "09:41" and "10:00" share a layout;
          * "9:41" and "10:41" do not, because the 12-hour hour field grows a
          * digit at ten o'clock.
+         *
+         * The date's placement is checked separately by the caller, which has
+         * to convert it before it can be compared.
          */
         fun matches(candidate: List<String>, candidateDate: String?): Boolean {
-            // The date is part of the shape: its width decides the texture's.
+            // The date's text decides its natural width, and so the layout's.
             if (dateText != candidateDate) return false
             if (candidate.size != rowTexts.size) return false
             for (index in candidate.indices) {
@@ -1184,9 +1440,37 @@ class ClockFaceRenderer(private val context: Context) {
         const val ROW_SPACING_EM = 0.04f
         /** Segment rows sit closer: their boxes have no ascent slack. */
         const val SEGMENT_ROW_SPACING_EM = 0.14f
-        const val DATE_SIZE_EM = 0.20f
-        const val DATE_GAP_EM = 0.13f
+        /**
+         * Smallest the whole face may be rasterised at, whatever the date's
+         * placement asks for. Below this the digits would be visibly soft.
+         */
+        const val MIN_TEXT_SIZE_PX = 48f
+        /**
+         * Ceiling on the face bitmap's area. It is re-uploaded on every
+         * animation frame, so this is an upload budget as much as a memory
+         * one; only a date placed far from the digits ever reaches it.
+         */
+        const val MAX_FACE_PIXELS = 2_000_000f
+        /**
+         * How many face pixels per displayed pixel is worth drawing. Above
+         * this the extra detail cannot be seen, and the shader is downscaling
+         * it away on every frame.
+         */
+        const val MAX_OVERSAMPLE = 1.6f
+        /**
+         * The fewest face pixels per displayed pixel the budget may force.
+         * Slightly under 1:1 is barely perceptible; below it the digits are.
+         */
+        const val MIN_SAMPLE = 0.9f
+        /** Size the date is measured at before being scaled into its box. */
+        const val DATE_PROBE_PX = 100f
+        /** Transparent margin around the date, as a fraction of its height. */
+        const val DATE_MARGIN_FRACTION = 0.08f
+        /** Below this the date's box is too small to draw into. */
+        const val MIN_DATE_PX = 4f
         const val DATE_TRACKING_EM = 0.02f
+        /** Digits belonging to the hour; the rest take [ClockStyle.minuteDim]. */
+        const val HOUR_DIGITS = 2
         /** Gap between neighbouring segments, as a fraction of their thickness. */
         const val SEGMENT_INSET = 0.22f
         const val DATE_OPACITY = 0.88f
@@ -1244,8 +1528,13 @@ class ClockFaceRenderer(private val context: Context) {
 }
 
 /**
- * The glyphs' extent inside a face bitmap, as fractions of its width and
+ * The digits' extent inside a face bitmap, as fractions of its width and
  * height, plus the bitmap's own aspect ratio.
+ *
+ * The bitmap is larger than this: it carries margin for the animations and,
+ * when the date is shown, whatever room the date needs wherever the user put
+ * it. Only the digits are described here, because the digits are what the
+ * user places — everything else follows from them.
  */
 data class ClockFaceBox(
     val aspect: Float,
@@ -1253,4 +1542,61 @@ data class ClockFaceBox(
     val top: Float,
     val right: Float,
     val bottom: Float
-)
+) {
+    val widthFraction: Float get() = (right - left).coerceIn(0.01f, 1f)
+    val heightFraction: Float get() = (bottom - top).coerceIn(0.01f, 1f)
+
+    /**
+     * The digits' own width/height ratio in pixels — what the stored
+     * placement is relative to, and unaffected by the date or by the
+     * animation margin.
+     */
+    val contentAspect: Float
+        get() = (aspect * widthFraction / heightFraction).coerceIn(0.02f, 50f)
+
+    companion object {
+        /** A face that is all digits: what a renderer with no layout reports. */
+        val IDENTITY = ClockFaceBox(aspect = 1f, left = 0f, top = 0f, right = 1f, bottom = 1f)
+    }
+}
+
+/**
+ * Where the date sits, in units of the digits' box: (0, 0) is the digits'
+ * top-left corner and (1, 1) the bottom-right, so 1 on [width] is exactly as
+ * wide as the digits are.
+ *
+ * ## Why the date is stored relative to the digits
+ *
+ * The date is drawn into the same bitmap as the digits — one texture, one
+ * rectangle, one sampler, on every effect and both backends. Its position
+ * therefore has to be expressed against the digits rather than against the
+ * screen, and [ClockBoxPlacement.relativeDateBox] is the one place that
+ * converts the user's screen placement into this.
+ */
+data class ClockDateLayout(
+    val offsetX: Float,
+    val offsetY: Float,
+    val width: Float,
+    val height: Float
+) {
+    /**
+     * Rounded to a fixed grid. Each distinct value is a bitmap of a different
+     * size, so a drag that produced a new one on every frame would reallocate
+     * (and re-upload) several megabytes 60 times a second. The grid is fine
+     * enough to be invisible and coarse enough that most drag frames reuse
+     * the bitmap they already have.
+     */
+    fun quantized(): ClockDateLayout = ClockDateLayout(
+        offsetX = snap(offsetX),
+        offsetY = snap(offsetY),
+        width = snap(width),
+        height = snap(height)
+    )
+
+    private fun snap(value: Float): Float =
+        (value * QUANTIZE).roundToInt() / QUANTIZE
+
+    private companion object {
+        const val QUANTIZE = 384f
+    }
+}

@@ -72,7 +72,6 @@ data class AtmosphereRenderState(
      */
     val clockDepthEnabled: Boolean = AtmosphereClockPolicy.DEFAULT_DEPTH,
     val clockStyleId: String = ClockStyle.DEFAULT.id,
-    val clockShowSeconds: Boolean = AtmosphereClockPolicy.DEFAULT_SECONDS,
     val clockShowDate: Boolean = AtmosphereClockPolicy.DEFAULT_DATE,
     val clockAnimate: Boolean = AtmosphereClockPolicy.DEFAULT_ANIMATE,
     val clockCenterX: Float = AtmosphereClockPolicy.DEFAULT_CENTER_X,
@@ -81,6 +80,11 @@ data class AtmosphereRenderState(
     /** Per-axis stretch on top of [clockHeight]; 1.0 is a no-op. */
     val clockWidthScale: Float = AtmosphereClockPolicy.DEFAULT_WIDTH_SCALE,
     val clockHeightScale: Float = AtmosphereClockPolicy.DEFAULT_HEIGHT_SCALE,
+    /** The date's own placement, set and stored exactly like the clock's. */
+    val clockDateCenterX: Float = AtmosphereClockPolicy.DEFAULT_DATE_CENTER_X,
+    val clockDateTop: Float = AtmosphereClockPolicy.DEFAULT_DATE_TOP,
+    val clockDateHeight: Float = AtmosphereClockPolicy.DEFAULT_DATE_HEIGHT,
+    val clockDateWidthScale: Float = AtmosphereClockPolicy.DEFAULT_DATE_WIDTH_SCALE,
     val clockOpacity: Float = AtmosphereClockPolicy.DEFAULT_OPACITY,
     /**
      * Already-resolved ARGB glyph colour — never [ClockPalette.AUTO]. The
@@ -111,6 +115,11 @@ data class AtmosphereRenderState(
     // face. Until then the shader must not sample the clock binding — see
     // clockMeta.y in vulkan_atmosphere_jni.cpp.
     val clockFaceUploaded: Boolean = false,
+    // Vulkan-only, dynamic: where the digits sit inside the face bitmap, so
+    // the stored placement (which describes the digits) can be turned into
+    // the rectangle the shader samples. See ClockOverlayState.faceContentTop.
+    val clockFaceContentTop: Float = 0f,
+    val clockFaceContentHeight: Float = 1f,
     val blobs: AtmosphereBlobFrame = AtmosphereBlobFrame()
 ) {
     fun sanitized(): AtmosphereRenderState {
@@ -137,6 +146,11 @@ data class AtmosphereRenderState(
                 AtmosphereClockPolicy.sanitizeAxisScale(clockWidthScale),
             clockHeightScale =
                 AtmosphereClockPolicy.sanitizeAxisScale(clockHeightScale),
+            clockDateCenterX = AtmosphereClockPolicy.sanitizeCenterX(clockDateCenterX),
+            clockDateTop = AtmosphereClockPolicy.sanitizeTop(clockDateTop),
+            clockDateHeight = AtmosphereClockPolicy.sanitizeHeight(clockDateHeight),
+            clockDateWidthScale =
+                AtmosphereClockPolicy.sanitizeAxisScale(clockDateWidthScale),
             clockOpacity = AtmosphereClockPolicy.sanitizeOpacity(clockOpacity),
             clockColor = clockColor or (0xFF shl 24),
             clockHourFormat = AtmosphereClockPolicy.sanitizeHourFormat(clockHourFormat),
@@ -197,7 +211,6 @@ data class AtmosphereRenderState(
         enabled = clockEnabled,
         depthEnabled = clockDepthEnabled,
         styleId = clockStyleId,
-        showSeconds = clockShowSeconds,
         showDate = clockShowDate,
         animate = clockAnimate,
         centerX = clockCenterX,
@@ -205,6 +218,10 @@ data class AtmosphereRenderState(
         height = clockHeight,
         widthScale = clockWidthScale,
         heightScale = clockHeightScale,
+        dateCenterX = clockDateCenterX,
+        dateTop = clockDateTop,
+        dateHeight = clockDateHeight,
+        dateWidthScale = clockDateWidthScale,
         opacity = clockOpacity,
         requestedColor = clockColor,
         color = clockColor,
@@ -213,7 +230,9 @@ data class AtmosphereRenderState(
         lockedProgress = clockLockedProgress,
         unlockedProgress = clockUnlockedProgress,
         textureAspect = clockTextureAspect,
-        faceUploaded = clockFaceUploaded
+        faceUploaded = clockFaceUploaded,
+        faceContentTop = clockFaceContentTop,
+        faceContentHeight = clockFaceContentHeight
     )
 
     private fun Float.finiteOr(fallback: Float): Float {
