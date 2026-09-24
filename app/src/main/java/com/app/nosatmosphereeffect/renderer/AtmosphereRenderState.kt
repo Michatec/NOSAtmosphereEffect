@@ -86,6 +86,7 @@ data class AtmosphereRenderState(
     val clockDateHeight: Float = AtmosphereClockPolicy.DEFAULT_DATE_HEIGHT,
     val clockDateWidthScale: Float = AtmosphereClockPolicy.DEFAULT_DATE_WIDTH_SCALE,
     val clockOpacity: Float = AtmosphereClockPolicy.DEFAULT_OPACITY,
+    val clockFrost: Float = AtmosphereClockPolicy.DEFAULT_FROST,
     /**
      * Already-resolved ARGB glyph colour — never [ClockPalette.AUTO]. The
      * controller turns the stored preference (which may be AUTO) into a
@@ -152,6 +153,7 @@ data class AtmosphereRenderState(
             clockDateWidthScale =
                 AtmosphereClockPolicy.sanitizeAxisScale(clockDateWidthScale),
             clockOpacity = AtmosphereClockPolicy.sanitizeOpacity(clockOpacity),
+            clockFrost = AtmosphereClockPolicy.sanitizeFrost(clockFrost),
             clockColor = clockColor or (0xFF shl 24),
             clockHourFormat = AtmosphereClockPolicy.sanitizeHourFormat(clockHourFormat),
             clockScreenId = ClockScreenPolicy.sanitizeScreenId(clockScreenId),
@@ -223,6 +225,7 @@ data class AtmosphereRenderState(
         dateHeight = clockDateHeight,
         dateWidthScale = clockDateWidthScale,
         opacity = clockOpacity,
+        frost = clockFrost,
         requestedColor = clockColor,
         color = clockColor,
         hourFormat = clockHourFormat,

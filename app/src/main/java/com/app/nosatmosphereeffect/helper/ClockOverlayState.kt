@@ -56,6 +56,8 @@ data class ClockOverlayState(
     val dateHeight: Float = AtmosphereClockPolicy.DEFAULT_DATE_HEIGHT,
     val dateWidthScale: Float = AtmosphereClockPolicy.DEFAULT_DATE_WIDTH_SCALE,
     val opacity: Float = AtmosphereClockPolicy.DEFAULT_OPACITY,
+    /** How frosted the glass is, 0..1. See [glassMeta] for how it travels. */
+    val frost: Float = AtmosphereClockPolicy.DEFAULT_FROST,
     /** The stored preference; may be [ClockPalette.AUTO]. */
     val requestedColor: Int = AtmosphereClockPolicy.DEFAULT_COLOR,
     /** Already resolved — never [ClockPalette.AUTO]. */
@@ -121,6 +123,7 @@ data class ClockOverlayState(
             dateHeight = AtmosphereClockPolicy.sanitizeHeight(dateHeight),
             dateWidthScale = AtmosphereClockPolicy.sanitizeAxisScale(dateWidthScale),
             opacity = AtmosphereClockPolicy.sanitizeOpacity(opacity),
+            frost = AtmosphereClockPolicy.sanitizeFrost(frost),
             requestedColor = AtmosphereClockPolicy.sanitizeColor(requestedColor),
             // A stray AUTO reaching a renderer would draw an opaque black
             // clock, so it is collapsed to the fallback here rather than
@@ -210,6 +213,19 @@ data class ClockOverlayState(
     /** True when the face should be drawn as refracting glass. */
     val liquidGlass: Boolean
         get() = style.liquidGlass
+
+    /**
+     * The single number the shaders read for the glass: 0 for a flat face, and
+     * `1 + frost` for a glass one.
+     *
+     * Two settings in one float because the shaders take it in a slot that
+     * already exists — `uClockGlass` on GLES, `clockMeta.w` on Vulkan. Adding
+     * a field to six push-constant structs and six shader uniform blocks to
+     * carry a second number is the kind of change that has broken this
+     * backend before, and the encoding is exact.
+     */
+    val glassMeta: Float
+        get() = if (liquidGlass) 1f + AtmosphereClockPolicy.sanitizeFrost(frost) else 0f
 
     /**
      * The face texture's top edge — where the renderers place the bitmap.

@@ -832,9 +832,10 @@ class AtmosphereRenderer(
             GLES30.glGetUniformLocation(programId, "uClockOpacity"),
             clockOpacity * visibility
         )
+        // 0 for a flat face, 1 + frost for glass — see ClockOverlayState.glassMeta.
         GLES30.glUniform1f(
             GLES30.glGetUniformLocation(programId, "uClockGlass"),
-            if (layout.liquidGlass) 1f else 0f
+            layout.glassMeta
         )
         GLES30.glUniform1f(
             GLES30.glGetUniformLocation(programId, "uClockDepth"),

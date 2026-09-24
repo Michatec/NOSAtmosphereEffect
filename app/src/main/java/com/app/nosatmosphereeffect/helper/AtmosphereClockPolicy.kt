@@ -68,6 +68,11 @@ object AtmosphereClockPolicy {
     const val GEOMETRY_VERSION = 2
     const val OPACITY_KEY = "atmosphere_clock_opacity"
     /**
+     * How frosted the glass is, 0..1: 0 is clear glass that shows the
+     * wallpaper sharply through the digits, 1 is milky and diffuse.
+     */
+    const val FROST_KEY = "atmosphere_clock_frost"
+    /**
      * Stored as an ARGB int. [ClockPalette.AUTO] (0) means "follow the
      * wallpaper", which is the default — a plain white clock reads as pasted
      * on, a wallpaper-tinted one reads as part of the image.
@@ -84,15 +89,17 @@ object AtmosphereClockPolicy {
     const val SCREEN_KEY = "atmosphere_clock_screen"
 
     const val DEFAULT_CENTER_X = 0.5f
-    const val DEFAULT_TOP = 0.13f
+    const val DEFAULT_TOP = 0.17f
     /**
-     * Fraction of screen height the face occupies. Raised from 0.16: the
-     * faces are stretched vertically now (see ClockStyle.verticalStretch),
-     * which makes the glyphs tall and narrow within their height budget, and
-     * a slightly larger budget is what turns that into a display clock
-     * rather than a tall caption.
+     * Fraction of screen height the DIGITS occupy.
+     *
+     * Cut from 0.24 when the stored geometry stopped describing the face
+     * texture and started describing the digits inside it. The texture is
+     * about a third margin, so keeping the old number would have handed
+     * everyone who had never opened the calibration screen a clock half as
+     * big again as the one they had.
      */
-    const val DEFAULT_HEIGHT = 0.24f
+    const val DEFAULT_HEIGHT = 0.15f
     const val DEFAULT_WIDTH_SCALE = 1f
     const val DEFAULT_HEIGHT_SCALE = 1f
     // Wider than the sliders these replaced allowed: the box is dragged, so
@@ -101,13 +108,19 @@ object AtmosphereClockPolicy {
     const val MIN_AXIS_SCALE = 0.35f
     const val MAX_AXIS_SCALE = 2.6f
     const val DEFAULT_OPACITY = 1f
+    /**
+     * Clear by default. Frost is a departure from the glass rather than the
+     * normal state of it: it is the setting that makes a clock milky, and a
+     * clock that starts milky reads as one that has gone cloudy.
+     */
+    const val DEFAULT_FROST = 0f
     const val DEFAULT_DEPTH = true
     const val DEFAULT_DATE = false
 
     /** The date sits just above the clock until it is dragged elsewhere. */
     const val DEFAULT_DATE_CENTER_X = 0.5f
-    const val DEFAULT_DATE_HEIGHT = 0.042f
-    const val DEFAULT_DATE_TOP = 0.07f
+    const val DEFAULT_DATE_HEIGHT = 0.032f
+    const val DEFAULT_DATE_TOP = 0.122f
     const val DEFAULT_DATE_WIDTH_SCALE = 1f
     const val DEFAULT_ANIMATE = true
     const val DEFAULT_COLOR = ClockPalette.AUTO
@@ -193,6 +206,7 @@ object AtmosphereClockPolicy {
         DATE_HEIGHT_KEY,
         DATE_WIDTH_SCALE_KEY,
         GEOMETRY_VERSION_KEY,
+        FROST_KEY,
         OPACITY_KEY
     )
 
@@ -285,6 +299,11 @@ object AtmosphereClockPolicy {
 
     fun sanitizeOpacity(value: Float): Float {
         if (!value.isFinite()) return DEFAULT_OPACITY
+        return value.coerceIn(0f, 1f)
+    }
+
+    fun sanitizeFrost(value: Float): Float {
+        if (!value.isFinite()) return DEFAULT_FROST
         return value.coerceIn(0f, 1f)
     }
 

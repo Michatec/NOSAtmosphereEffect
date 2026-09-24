@@ -207,9 +207,10 @@ class GlesClockOverlay(
             GLES30.glGetUniformLocation(programId, "uClockDepth"),
             if (current.depthEnabled && subjectMaskAvailable) 1f else 0f
         )
+        // 0 for a flat face, 1 + frost for glass — see ClockOverlayState.glassMeta.
         GLES30.glUniform1f(
             GLES30.glGetUniformLocation(programId, "uClockGlass"),
-            if (current.liquidGlass) 1f else 0f
+            current.glassMeta
         )
         GLES30.glActiveTexture(textureUnit)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, provider.textureId)

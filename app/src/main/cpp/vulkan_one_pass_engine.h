@@ -106,7 +106,7 @@ void writeClockParams(
     float opacity,
     bool uploaded,
     bool depth,
-    bool glass = false
+    float glassMeta = 0.0F
 ) {
     const float safeAspect =
         std::isfinite(surfaceAspect) && surfaceAspect > 0.0F
@@ -126,8 +126,11 @@ void writeClockParams(
     params.clockMeta[1] = uploaded ? 1.0F : 0.0F;
     params.clockMeta[2] = depth ? 1.0F : 0.0F;
     // Liquid Glass face: the shader refracts the wallpaper through the glyph
-    // shapes instead of drawing them in a flat colour.
-    params.clockMeta[3] = glass ? 1.0F : 0.0F;
+    // shapes instead of drawing them in a flat colour. Two settings ride in
+    // this one slot — 0 is a flat face, and anything above 1 is glass whose
+    // frost level is the fractional part. See ClockOverlayState.glassMeta.
+    params.clockMeta[3] =
+        std::isfinite(glassMeta) && glassMeta > 0.0F ? glassMeta : 0.0F;
 }
 
 }  // namespace atmo::vulkan

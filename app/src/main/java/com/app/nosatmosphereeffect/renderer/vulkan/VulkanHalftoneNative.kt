@@ -58,7 +58,8 @@ internal object VulkanHalftoneNative {
         clockOpacity: Float,
         clockUploaded: Boolean,
         clockDepth: Boolean,
-        clockGlass: Boolean
+        /** 0 for a flat face, 1 + frost for glass — ClockOverlayState.glassMeta. */
+        clockGlass: Float
     )
 
     external fun nativeRender(handle: Long): Int

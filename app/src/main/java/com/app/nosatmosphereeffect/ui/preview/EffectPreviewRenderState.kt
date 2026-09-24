@@ -94,6 +94,7 @@ internal object EffectPreviewStatePolicy {
                         clockDateHeight = safe.dateHeight,
                         clockDateWidthScale = safe.dateWidthScale,
                         clockOpacity = safe.opacity,
+                        clockFrost = safe.frost,
                         clockColor = safe.color,
                         clockHourFormat = safe.hourFormat,
                         clockScreenId = safe.screenId
