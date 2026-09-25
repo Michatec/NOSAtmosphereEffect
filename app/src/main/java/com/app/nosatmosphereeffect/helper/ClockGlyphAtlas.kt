@@ -195,7 +195,20 @@ internal class ClockGlyphAtlas private constructor(
         }
     }
 
-    /** Draws a mask with [draw], then returns it as an ALPHA_8 distance field. */
+    /**
+     * Draws a mask with [draw] and returns it as an ALPHA_8 distance field.
+     *
+     * The glyph is traced at [SUPERSAMPLE] times the tile's size and the
+     * field is averaged back down. The transform measures distance in whole
+     * pixels, and rounding the edge to the nearest one leaves about a third
+     * of a pixel of error in the stored field — which is invisible at the
+     * size the face was traced at and is not invisible once the shader has
+     * magnified it two or three times over to fill a large clock. It showed
+     * up as a ragged, low-resolution look along the outside of round strokes.
+     * Tracing at twice the resolution halves that error, and averaging a
+     * distance field is exact enough: it is smooth by construction, which is
+     * the whole reason the shader can magnify it at all.
+     */
     private fun rasterise(
         width: Int,
         height: Int,
@@ -203,29 +216,69 @@ internal class ClockGlyphAtlas private constructor(
         draw: (Canvas) -> Unit
     ): Bitmap? {
         if (width.toLong() * height > MAX_TILE_PIXELS) return null
-        val mask = try {
-            createBitmap(width, height, Bitmap.Config.ALPHA_8)
+        val traceWidth = width * SUPERSAMPLE
+        val traceHeight = height * SUPERSAMPLE
+        if (traceWidth.toLong() * traceHeight > MAX_TRACE_PIXELS) return null
+        val trace = try {
+            createBitmap(traceWidth, traceHeight, Bitmap.Config.ALPHA_8)
         } catch (_: OutOfMemoryError) {
             return null
         }
+        val tile = try {
+            createBitmap(width, height, Bitmap.Config.ALPHA_8)
+        } catch (_: OutOfMemoryError) {
+            trace.recycle()
+            return null
+        }
         return try {
-            draw(Canvas(mask))
-            val coverage = readAlpha(mask, width, height)
-            val field = ClockDistanceField.build(
+            val canvas = Canvas(trace)
+            canvas.scale(SUPERSAMPLE.toFloat(), SUPERSAMPLE.toFloat())
+            draw(canvas)
+            val coverage = readAlpha(trace, traceWidth, traceHeight)
+            val traced = ClockDistanceField.build(
                 coverage = coverage,
-                width = width,
-                height = height,
-                spread = spread
+                width = traceWidth,
+                height = traceHeight,
+                spread = spread * SUPERSAMPLE
             )
-            writeAlpha(mask, field)
-            mask
+            writeAlpha(tile, downsample(traced, traceWidth, traceHeight, width, height))
+            trace.recycle()
+            tile
         } catch (_: RuntimeException) {
-            mask.recycle()
+            trace.recycle()
+            tile.recycle()
             null
         } catch (_: OutOfMemoryError) {
-            mask.recycle()
+            trace.recycle()
+            tile.recycle()
             null
         }
+    }
+
+    /** Averages [SUPERSAMPLE] by [SUPERSAMPLE] blocks of the traced field. */
+    private fun downsample(
+        field: FloatArray,
+        traceWidth: Int,
+        traceHeight: Int,
+        width: Int,
+        height: Int
+    ): FloatArray {
+        val out = FloatArray(width * height)
+        val weight = 1f / (SUPERSAMPLE * SUPERSAMPLE)
+        for (y in 0 until height) {
+            val target = y * width
+            for (x in 0 until width) {
+                var total = 0f
+                for (dy in 0 until SUPERSAMPLE) {
+                    val row = (y * SUPERSAMPLE + dy).coerceAtMost(traceHeight - 1) * traceWidth
+                    for (dx in 0 until SUPERSAMPLE) {
+                        total += field[row + (x * SUPERSAMPLE + dx).coerceAtMost(traceWidth - 1)]
+                    }
+                }
+                out[target + x] = total * weight
+            }
+        }
+        return out
     }
 
     private fun readAlpha(bitmap: Bitmap, width: Int, height: Int): FloatArray {
@@ -303,9 +356,13 @@ internal class ClockGlyphAtlas private constructor(
         /** Matches ClockFaceRenderer's date tracking, so the tile measures the same. */
         private const val DATE_TRACKING_EM = 0.02f
 
+        /** How much finer the glyph is traced than the tile it is stored in. */
+        private const val SUPERSAMPLE = 2
+
         private const val TAG = "ClockGlyphAtlas"
         private const val MAX_RUNS = 8
         private const val MAX_TILE_PIXELS = 4_000_000L
+        private const val MAX_TRACE_PIXELS = 16_000_000L
     }
 }
 
