@@ -260,11 +260,27 @@ vec3 clockGlass(
         // a stroke at any rasterisation, which the fixed nine texels were not.
         float edge = 0.0;
         vec2 slope = vec2(0.0);
-        // Skipped deep inside a stroke, where the field has levelled off and
-        // its gradient no longer says anything: there is no rim there anyway.
-        if (depth < 0.92) {
-            float spreadTexels = clamp(1.0 / max(length(gradient), 1e-4), 1.0, 128.0);
-            vec2 reach = texel * (spreadTexels * 0.52);
+        // Faded out towards the middle of a stroke, and skipped entirely past
+        // it. Two things go wrong deep inside: the field levels off, so its
+        // gradient stops saying which way the surface faces, and where two
+        // strokes meet the gradient collapses on the ridge between them. The
+        // reach below is derived from that gradient, so an unfaded corner
+        // reached far across the glyph and refracted a piece of some other
+        // stroke into itself. There is no rim that deep in either way.
+        float confidence = 1.0 - smoothstep(0.45, 0.70, depth);
+        if (confidence > 0.002) {
+            // Bounded as well as faded: a ridge can collapse the gradient
+            // faster than the fade covers, and the reach must stay within
+            // the stroke it belongs to.
+            float spreadTexels = clamp(1.0 / max(length(gradient), 1e-4), 2.0, 48.0);
+            // The rim's width, as a share of the field's spread. It started
+            // as the nine texels this face was written with, which came to
+            // 0.52 of a spread; it is wider than that now because the line
+            // read thin. It cannot go much past this: the difference cancels
+            // where a stroke is narrower than twice the reach, so widening it
+            // far enough starts filling in the stems themselves, which is the
+            // merged look this is here to avoid.
+            vec2 reach = texel * (spreadTexels * 0.66);
             float aa = 0.5 / spreadTexels;
             float lo = 0.5 - aa;
             float hi = 0.5 + aa;
@@ -290,6 +306,7 @@ vec3 clockGlass(
                         texture(uClockTexture, clamp(clockUv - vec2(0.0, reach.y), 0.0, 1.0)).a
                     )
             );
+            slope *= confidence;
             edge = clamp(length(slope) * 2.0, 0.0, 1.0);
         }
         vec2 classicUv = clamp(vTexCoord - slope * (0.11 * rectSize.y), 0.0, 1.0);

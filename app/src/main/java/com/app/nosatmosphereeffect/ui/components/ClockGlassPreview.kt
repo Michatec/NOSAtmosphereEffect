@@ -250,9 +250,13 @@ half4 main(float2 coord) {
         // there for why it is not read off the field directly.
         float edge = 0.0;
         float2 slope = float2(0.0);
-        if (depth < 0.92) {
-            float spreadPx = clamp(0.5 / max(length(gradient), 1e-4), 1.0, 256.0);
-            float reach = spreadPx * 0.52;
+        // Faded and bounded towards the middle of a stroke, for the reasons
+        // set out in the effect shaders.
+        float confidence = 1.0 - smoothstep(0.45, 0.70, depth);
+        if (confidence > 0.002) {
+            float spreadPx = clamp(0.5 / max(length(gradient), 1e-4), 2.0, 96.0);
+            // The same share of the spread the effect shaders use.
+            float reach = spreadPx * 0.66;
             float aa = 0.5 / spreadPx;
             float lo = 0.5 - aa;
             float hi = 0.5 + aa;
@@ -262,6 +266,7 @@ half4 main(float2 coord) {
                 smoothstep(lo, hi, faceField(coord + float2(0.0, reach))) -
                     smoothstep(lo, hi, faceField(coord - float2(0.0, reach)))
             );
+            slope = slope * confidence;
             edge = clamp(length(slope) * 2.0, 0.0, 1.0);
         }
         float2 at = coord - slope * refractionClassic;
