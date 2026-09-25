@@ -245,8 +245,30 @@ half4 main(float2 coord) {
     float3 light = normalize(float3(-0.5, -0.72, 0.48));
 
     if (mode >= 2.5) {
-        float edge = 1.0 - smoothstep(0.40, 0.64, depth);
-        float2 slope = inward * 0.5 * edge;
+        // The bevel is the difference of the silhouette taken a bevel's width
+        // apart, exactly as the effect shaders do it — see the long note
+        // there for why it is not read off the field directly.
+        float edge = 0.0;
+        float2 slope = float2(0.0);
+        // Faded and bounded towards the middle of a stroke, for the reasons
+        // set out in the effect shaders.
+        float confidence = 1.0 - smoothstep(0.45, 0.70, depth);
+        if (confidence > 0.002) {
+            float spreadPx = clamp(0.5 / max(length(gradient), 1e-4), 2.0, 96.0);
+            // The same share of the spread the effect shaders use.
+            float reach = spreadPx * 0.66;
+            float aa = 0.5 / spreadPx;
+            float lo = 0.5 - aa;
+            float hi = 0.5 + aa;
+            slope = 0.5 * float2(
+                smoothstep(lo, hi, faceField(coord + float2(reach, 0.0))) -
+                    smoothstep(lo, hi, faceField(coord - float2(reach, 0.0))),
+                smoothstep(lo, hi, faceField(coord + float2(0.0, reach))) -
+                    smoothstep(lo, hi, faceField(coord - float2(0.0, reach)))
+            );
+            slope = slope * confidence;
+            edge = clamp(length(slope) * 2.0, 0.0, 1.0);
+        }
         float2 at = coord - slope * refractionClassic;
         float3 refracted = (
             2.0 * float3(wallpaper.eval(at).rgb) +
