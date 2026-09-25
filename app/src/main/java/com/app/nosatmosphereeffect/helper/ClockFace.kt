@@ -788,7 +788,7 @@ class ClockFaceRenderer(private val context: Context) {
             face.dateTop - tile.inkTop * scaleY
         )
         tilePaint.color = color
-        tilePaint.alpha = erosionAlpha(progress * DATE_OPACITY)
+        tilePaint.alpha = erosionAlpha(progress)
         target.drawBitmap(tile.bitmap, glyphMatrix, tilePaint)
         return true
     }
@@ -1399,8 +1399,6 @@ class ClockFaceRenderer(private val context: Context) {
         /** Below this the date's box is too small to draw into. */
         const val MIN_DATE_PX = 4f
         const val DATE_TRACKING_EM = 0.02f
-        /** The date is a shade softer than the digits, as a lock screen sets it. */
-        const val DATE_OPACITY = 0.88f
         /** Day, date and month, ordered and punctuated by the device's locale. */
         const val DATE_SKELETON = "EEEdMMM"
 
