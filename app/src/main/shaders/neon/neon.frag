@@ -98,8 +98,62 @@ vec3 clockGlass(
     // resolution the face happened to be rasterised at. Measured off the
     // field instead, it is the same fraction of a stroke at every size.
     if (mode >= 2.5) {
-        float edge = 1.0 - smoothstep(0.40, 0.64, depth);
-        vec2 slope = inward * 0.5 * edge;
+        // ### Why the bevel is measured this way and not off the field
+        //
+        // This face has always taken its bevel as the difference of the
+        // silhouette sampled a bevel's width to either side. That difference
+        // *cancels* wherever a stroke is narrower than twice the bevel — both
+        // samples land outside it — so thin strokes and tight curves carry no
+        // rim at all, and only the broad parts are outlined. That is the
+        // sketched quality the face is liked for.
+        //
+        // Reading the distance field directly instead — "is this pixel within
+        // a bevel of the edge" — has no such cancellation: it lights every
+        // thin stroke solid white, and the rims that should sit either side
+        // of one merge into a single band. So the original computation is
+        // kept, taken on the silhouette the field reconstructs rather than on
+        // a coverage mask.
+        //
+        // How far to reach is the one thing the field has to supply. Its
+        // gradient has unit length wherever it is still ramping, so the
+        // spread it was built with — and with it the nine texels this bevel
+        // used to be, as a fraction of an em — follows from the gradient's
+        // magnitude in texels. That is what keeps the bevel the same share of
+        // a stroke at any rasterisation, which the fixed nine texels were not.
+        float edge = 0.0;
+        vec2 slope = vec2(0.0);
+        // Skipped deep inside a stroke, where the field has levelled off and
+        // its gradient no longer says anything: there is no rim there anyway.
+        if (depth < 0.92) {
+            float spreadTexels = clamp(1.0 / max(length(gradient), 1e-4), 1.0, 128.0);
+            vec2 reach = texel * (spreadTexels * 0.52);
+            float aa = 0.5 / spreadTexels;
+            float lo = 0.5 - aa;
+            float hi = 0.5 + aa;
+            slope = 0.5 * vec2(
+                smoothstep(
+                    lo,
+                    hi,
+                    texture(clockTexture, clamp(clockUv + vec2(reach.x, 0.0), 0.0, 1.0)).a
+                ) -
+                    smoothstep(
+                        lo,
+                        hi,
+                        texture(clockTexture, clamp(clockUv - vec2(reach.x, 0.0), 0.0, 1.0)).a
+                    ),
+                smoothstep(
+                    lo,
+                    hi,
+                    texture(clockTexture, clamp(clockUv + vec2(0.0, reach.y), 0.0, 1.0)).a
+                ) -
+                    smoothstep(
+                        lo,
+                        hi,
+                        texture(clockTexture, clamp(clockUv - vec2(0.0, reach.y), 0.0, 1.0)).a
+                    )
+            );
+            edge = clamp(length(slope) * 2.0, 0.0, 1.0);
+        }
         vec2 classicUv = clamp(vTexCoord - slope * (0.11 * rectSize.y), 0.0, 1.0);
         const float classicBlur = 0.0032;
         vec3 classicRefracted = (

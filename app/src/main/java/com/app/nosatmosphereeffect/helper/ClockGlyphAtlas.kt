@@ -281,8 +281,16 @@ internal class ClockGlyphAtlas private constructor(
          */
         const val CANONICAL_EM = 256f
 
-        /** The date's em; its own strokes get their own share of the field. */
-        const val RUN_EM = 96f
+        /**
+         * The date's em; its own strokes get their own share of the field.
+         *
+         * Larger than the date is usually drawn at, because a date is sized
+         * by dragging its box and can be made as big as the clock. The field
+         * keeps the outline sharp at any magnification, but the shape itself
+         * is only as round as the tile it was traced from — at 96 a date
+         * enlarged a few times over started to show it in its curves.
+         */
+        const val RUN_EM = 160f
 
         /**
          * How far the field reaches either side of the edge, as a fraction of
