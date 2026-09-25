@@ -48,7 +48,6 @@ class ClockFramePump(
     private var handler: Handler? = null
 
     private var enabled = false
-    private var showSeconds = false
     private var visible = false
     private var closed = false
     private var scheduled = false
@@ -63,11 +62,10 @@ class ClockFramePump(
     }
 
     /** [enabled] should be false whenever the clock is off, to idle entirely. */
-    fun configure(enabled: Boolean, showSeconds: Boolean) {
+    fun configure(enabled: Boolean) {
         if (closed) return
-        val changed = this.enabled != enabled || this.showSeconds != showSeconds
+        val changed = this.enabled != enabled
         this.enabled = enabled
-        this.showSeconds = showSeconds
         if (changed) restart()
     }
 
@@ -110,13 +108,13 @@ class ClockFramePump(
     }
 
     /**
-     * Milliseconds until the next second or minute boundary in wall time,
+     * Milliseconds until the next minute boundary in wall time,
      * measured against uptime so the post is not itself affected by a clock
      * adjustment. Clamped to a small floor so a boundary landing on the
      * current instant cannot spin.
      */
     private fun delayToNextBoundaryMs(): Long {
-        val period = if (showSeconds) 1_000L else 60_000L
+        val period = MINUTE_MS
         val now = System.currentTimeMillis()
         val remainder = now % period
         val delay = period - remainder
@@ -169,5 +167,7 @@ class ClockFramePump(
     private companion object {
         const val TAG = "ClockFramePump"
         const val MIN_DELAY_MS = 16L
+        /** The clock shows no seconds, so it only ever ticks on the minute. */
+        const val MINUTE_MS = 60_000L
     }
 }

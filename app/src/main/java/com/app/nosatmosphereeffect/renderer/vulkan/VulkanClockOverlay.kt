@@ -48,6 +48,35 @@ internal class VulkanClockOverlay(
     val aspectRatio: Float
         get() = uploader.aspectRatio
 
+    /**
+     * Folds the dynamic face measurements into [state]: the bitmap's aspect
+     * and where the digits sit inside it. The stored geometry describes the
+     * digits, so without the second part the shader could not work out which
+     * rectangle to sample.
+     *
+     * Until a face has been uploaded there is nothing to measure, so the
+     * values already in [fallback] are kept rather than replaced with the
+     * defaults of a state that came from preferences.
+     */
+    fun withFaceMetrics(
+        state: ClockOverlayState,
+        fallback: ClockOverlayState = state
+    ): ClockOverlayState {
+        if (!hasUploadedFace) {
+            return state.copy(
+                textureAspect = fallback.textureAspect,
+                faceContentTop = fallback.faceContentTop,
+                faceContentHeight = fallback.faceContentHeight
+            )
+        }
+        val box = uploader.faceBox
+        return state.copy(
+            textureAspect = uploader.aspectRatio,
+            faceContentTop = box.top,
+            faceContentHeight = box.heightFraction
+        )
+    }
+
     val hasUploadedFace: Boolean
         get() = uploader.hasUploadedFace
 
@@ -89,10 +118,12 @@ internal class VulkanClockOverlay(
             pendingState = null
             appliedState = next
             uploader.style = next.style
-            uploader.showSeconds = next.showSeconds
+            uploader.showDate = next.showDate
             uploader.animateDigits = next.animate
             uploader.animateEntry = next.animate
             uploader.color = next.color
+            uploader.clockPlacement = next.placement
+            uploader.datePlacement = next.datePlacement
             uploader.hourFormatOverride = next.hourFormatOverride
         }
         if (pendingFormatRefresh) {

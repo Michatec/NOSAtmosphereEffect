@@ -70,8 +70,7 @@ internal class VulkanGlassHost(
         if (!changed) return
         updateEffectState { state ->
             state.copy(
-                clock = state.clock.copy(
-                    textureAspect = clockOverlay.aspectRatio,
+                clock = clockOverlay.withFaceMetrics(state.clock).copy(
                     faceUploaded = true
                 )
             ).sanitized()
@@ -103,12 +102,7 @@ internal class VulkanGlassHost(
                 },
                 // Read from the overlay's own fields, never carried forward
                 // from a snapshot — see uploadClockOnWorker.
-                clock = safe.clock.copy(
-                    textureAspect = if (clockOverlay.hasUploadedFace) {
-                        clockOverlay.aspectRatio
-                    } else {
-                        current.clock.textureAspect
-                    },
+                clock = clockOverlay.withFaceMetrics(safe.clock, current.clock).copy(
                     faceUploaded = clockOverlay.hasUploadedFace &&
                         safe.clock.enabled
                 )

@@ -39,10 +39,30 @@ class ClockTextureProvider(context: Context) {
         get() = face.style
         set(value) { face.style = value }
 
-    var showSeconds: Boolean
-        get() = face.showSeconds
-        set(value) { face.showSeconds = value }
+    /** Draws the day and date above the digits. */
+    var showDate: Boolean
+        get() = face.showDate
+        set(value) { face.showDate = value }
 
+    /** Where the digits sit on screen; the date is placed against them. */
+    var clockPlacement: ClockPlacement
+        get() = face.clockPlacement
+        set(value) { face.clockPlacement = value }
+
+    /** Where the date sits on screen, set and stored like the clock's. */
+    var datePlacement: ClockPlacement
+        get() = face.datePlacement
+        set(value) { face.datePlacement = value }
+
+    /** Width/height of the surface; only the date's placement needs it. */
+    var screenAspect: Float
+        get() = face.screenAspect
+        set(value) { face.screenAspect = value }
+
+    /** Where the digits sit inside the bitmap, for turning the stored
+     *  placement into the rectangle the shader samples. */
+    val faceBox: ClockFaceBox
+        get() = face.faceBox
     var animateDigits: Boolean
         get() = face.animateDigits
         set(value) { face.animateDigits = value }
@@ -208,10 +228,11 @@ class ClockTextureProvider(context: Context) {
                 )
             }
 
-            // ClockFaceRenderer keeps the bitmap a fixed size for a given
-            // face, so after the first upload this is a texSubImage2D into
-            // existing storage — which matters because the digit animation
-            // re-uploads at frame rate for half a second on every change.
+            // ClockFaceRenderer keeps the bitmap a fixed size for as long as
+            // the face and the date's placement are unchanged, so after the
+            // first upload this is a texSubImage2D into existing storage —
+            // which matters because the digit animation re-uploads at frame
+            // rate for half a second on every change.
             if (
                 allocatedWidth == bitmap.width &&
                 allocatedHeight == bitmap.height

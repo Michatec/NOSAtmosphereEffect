@@ -74,13 +74,15 @@ internal class VulkanAtmosphereHost(
     }
 
     /**
-     * Face settings (style/seconds/animation) live on the uploader, not in
+     * Face settings (style/date/animation) live on the uploader, not in
      * the uniform buffer, because changing any of them changes the bitmap
      * rather than how the shader reads it.
      */
     private fun applyClockConfiguration(state: AtmosphereRenderState) {
         clockTexture.style = state.clockStyle
-        clockTexture.showSeconds = state.clockShowSeconds
+        clockTexture.showDate = state.clockShowDate
+        clockTexture.clockPlacement = state.clockOverlay().placement
+        clockTexture.datePlacement = state.clockOverlay().datePlacement
         clockTexture.animateDigits = state.clockAnimate
         clockTexture.animateEntry = state.clockAnimate
         clockTexture.color = state.clockColor
@@ -130,6 +132,16 @@ internal class VulkanAtmosphereHost(
                     clockTexture.aspectRatio
                 } else {
                     previous.clockTextureAspect
+                },
+                clockFaceContentTop = if (clockTexture.hasUploadedFace) {
+                    clockTexture.faceBox.top
+                } else {
+                    previous.clockFaceContentTop
+                },
+                clockFaceContentHeight = if (clockTexture.hasUploadedFace) {
+                    clockTexture.faceBox.heightFraction
+                } else {
+                    previous.clockFaceContentHeight
                 },
                 clockFaceUploaded = clockTexture.hasUploadedFace && safe.clockEnabled,
                 blobs = blobPlanner.frame(safe.progress)
@@ -273,9 +285,12 @@ internal class VulkanAtmosphereHost(
             if (VulkanAtmosphereNative.nativeUploadClock(handle, bitmap)) {
                 clockTexture.markUploaded()
                 val aspect = clockTexture.aspectRatio
+                val box = clockTexture.faceBox
                 updateEffectState {
                     it.copy(
                         clockTextureAspect = aspect,
+                        clockFaceContentTop = box.top,
+                        clockFaceContentHeight = box.heightFraction,
                         clockFaceUploaded = true
                     )
                 }

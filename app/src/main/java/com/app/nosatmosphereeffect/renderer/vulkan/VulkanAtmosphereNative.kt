@@ -63,7 +63,8 @@ internal object VulkanAtmosphereNative {
         clockOpacity: Float,
         clockUploaded: Boolean,
         clockDepth: Boolean,
-        clockGlass: Boolean,
+        /** 0 for a flat face, 1 + frost for glass — ClockOverlayState.glassMeta. */
+        clockGlass: Float,
         blobColors: FloatArray,
         blobPositions: FloatArray,
         blobSizes: FloatArray,
@@ -151,7 +152,7 @@ internal class VulkanAtmosphereBridge(
             clockOpacity = safe.effectiveClockOpacity(),
             clockUploaded = safe.clockEnabled && safe.clockFaceUploaded,
             clockDepth = safe.clockEnabled && safe.clockDepthEnabled,
-            clockGlass = safe.clockEnabled && safe.clockOverlay().liquidGlass,
+            clockGlass = if (safe.clockEnabled) safe.clockOverlay().glassMeta else 0f,
             blobColors = safe.blobs.colors,
             blobPositions = safe.blobs.positions,
             blobSizes = safe.blobs.sizes,

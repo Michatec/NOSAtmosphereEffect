@@ -14,7 +14,7 @@ class ClockBoxPlacementTest {
         right = 0.92f,
         bottom = 0.86f
     )
-    private val faceAspect = 1.4f
+    private val contentAspect = content.contentAspect
     private val screenAspect = 0.46f
     private val start = ClockPlacement(
         centerX = 0.5f,
@@ -24,7 +24,7 @@ class ClockBoxPlacementTest {
     )
 
     private fun contentOf(placement: ClockPlacement) =
-        ClockBoxPlacement.contentBox(placement, faceAspect, content, screenAspect)
+        ClockBoxPlacement.contentBox(placement, contentAspect, screenAspect)
 
     private fun drag(
         handle: ClockBoxHandle,
@@ -45,7 +45,7 @@ class ClockBoxPlacementTest {
             ClockBoxHandle.TOP -> ClockBoxRect(box.left, box.top + dy, box.right, box.bottom)
             ClockBoxHandle.BOTTOM -> ClockBoxRect(box.left, box.top, box.right, box.bottom + dy)
         }
-        return ClockBoxPlacement.apply(from, proposed, handle, faceAspect, content, screenAspect)
+        return ClockBoxPlacement.apply(from, proposed, handle, contentAspect, screenAspect)
     }
 
     @Test
@@ -151,9 +151,9 @@ class ClockBoxPlacementTest {
 
     @Test
     fun `a tall clock still reaches the top of the screen`() {
-        // The regression: the stored top is the face TEXTURE's top, and the
-        // digits start a fraction of its height below that. Clamping the
-        // texture meant the taller the clock, the further down it stopped.
+        // The regression: the stored top used to be the face TEXTURE's top,
+        // and the digits started a fraction of its height below that. Clamping
+        // the texture meant the taller the clock, the further down it stopped.
         val tall = start.copy(height = 0.5f)
         val short = start.copy(height = 0.1f)
 
@@ -201,6 +201,127 @@ class ClockBoxPlacementTest {
 
         assertTrue("should have grown", box.height > contentOf(start).height)
         assertTrue("bottom edge overflowed: $box", box.bottom <= 1f + 1e-4f)
+    }
+
+    @Test
+    fun `the texture surrounds the digits exactly where the face says it does`() {
+        // What the shaders are given. The digits must land on their own box
+        // whatever margin the bitmap carries around them, because that margin
+        // changes with the style and with where the date was dragged to.
+        val texture = ClockBoxPlacement.textureBox(start, content, screenAspect)
+        val digits = contentOf(start)
+
+        assertEquals(
+            digits.left,
+            texture.left + content.left * texture.width,
+            1e-5f
+        )
+        assertEquals(
+            digits.top,
+            texture.top + content.top * texture.height,
+            1e-5f
+        )
+        assertEquals(
+            digits.right,
+            texture.left + content.right * texture.width,
+            1e-5f
+        )
+        assertEquals(
+            digits.bottom,
+            texture.top + content.bottom * texture.height,
+            1e-5f
+        )
+    }
+
+    @Test
+    fun `a wider margin does not move the digits`() {
+        // The whole point of storing the digits' box rather than the texture's:
+        // the same stored numbers put the clock in the same place on a face
+        // whose bitmap is half as wide again.
+        val loose = ClockFaceBox(
+            aspect = 1.4f * 1.5f,
+            left = 0.28f,
+            top = 0.34f,
+            right = 0.72f,
+            bottom = 0.66f
+        )
+        val tight = ClockBoxPlacement.textureBox(start, content, screenAspect)
+        val wide = ClockBoxPlacement.textureBox(start, loose, screenAspect)
+
+        assertTrue("the looser face should need a bigger texture", wide.width > tight.width)
+        assertEquals(
+            start.top,
+            wide.top + loose.top * wide.height,
+            1e-5f
+        )
+        assertEquals(
+            start.centerX,
+            wide.left + (loose.left + loose.right) / 2f * wide.width,
+            1e-5f
+        )
+    }
+
+    @Test
+    fun `the date's relative box is what the two placements describe`() {
+        val date = ClockPlacement(centerX = 0.5f, top = 0.07f, height = 0.05f, widthScale = 1f)
+        val dateAspect = 5.5f
+        val relative = ClockBoxPlacement.relativeDateBox(
+            clock = start,
+            date = date,
+            contentAspect = contentAspect,
+            dateAspect = dateAspect,
+            screenAspect = screenAspect
+        )
+
+        val clockBox = contentOf(start)
+        val dateBox = ClockBoxPlacement.contentBox(date, dateAspect, screenAspect)
+        assertEquals(
+            (dateBox.left - clockBox.left) / clockBox.width,
+            relative.offsetX,
+            1e-5f
+        )
+        assertEquals(
+            (dateBox.top - clockBox.top) / clockBox.height,
+            relative.offsetY,
+            1e-5f
+        )
+        assertEquals(dateBox.width / clockBox.width, relative.width, 1e-5f)
+        assertEquals(dateBox.height / clockBox.height, relative.height, 1e-5f)
+        assertTrue("the date starts above the clock", relative.offsetY < 0f)
+    }
+
+    @Test
+    fun `quantizing the date's box lands on a grid and stays put`() {
+        val box = ClockDateLayout(
+            offsetX = 0.123456f,
+            offsetY = -0.501f,
+            width = 0.7771f,
+            height = 0.2002f
+        )
+        val once = box.quantized()
+
+        assertEquals(once, once.quantized())
+        assertEquals(box.offsetX, once.offsetX, 0.003f)
+        assertEquals(box.offsetY, once.offsetY, 0.003f)
+        assertEquals(box.width, once.width, 0.003f)
+        assertEquals(box.height, once.height, 0.003f)
+    }
+
+    @Test
+    fun `the date is placed by its own box, not the clock's`() {
+        // Dragging the date must not move or resize the clock.
+        val date = ClockPlacement(centerX = 0.3f, top = 0.8f, height = 0.05f, widthScale = 1f)
+        val moved = ClockBoxPlacement.apply(
+            start = date,
+            proposed = ClockBoxRect(0.1f, 0.6f, 0.6f, 0.65f),
+            handle = ClockBoxHandle.MOVE,
+            contentAspect = 5.5f,
+            screenAspect = screenAspect
+        )
+
+        assertEquals(0.6f, moved.top, 1e-4f)
+        assertEquals(date.height, moved.height, 0f)
+        assertEquals(date.widthScale, moved.widthScale, 0f)
     }
 
     @Test

@@ -147,12 +147,7 @@ internal class VulkanColorFillHost(
                 // thread changed a preference while uploadClockOnWorker runs
                 // on the render worker, and a stale read would silently lose
                 // whichever landed second.
-                clock = sanitized.clock.copy(
-                    textureAspect = if (clockOverlay.hasUploadedFace) {
-                        clockOverlay.aspectRatio
-                    } else {
-                        current.clock.textureAspect
-                    },
+                clock = clockOverlay.withFaceMetrics(sanitized.clock, current.clock).copy(
                     faceUploaded = clockOverlay.hasUploadedFace &&
                         sanitized.clock.enabled
                 )
@@ -201,8 +196,7 @@ internal class VulkanColorFillHost(
         if (!changed) return
         latestState.updateAndGet { state ->
             state.copy(
-                clock = state.clock.copy(
-                    textureAspect = clockOverlay.aspectRatio,
+                clock = clockOverlay.withFaceMetrics(state.clock).copy(
                     faceUploaded = true
                 )
             ).sanitized()
@@ -519,7 +513,7 @@ internal class VulkanColorFillHost(
                 // Depth needs a mask, so the user's switch is ANDed with one
                 // existing — the shader must never sample the clear texture.
                 clockDepth = state.clock.depthEnabled && state.hasSubject,
-                clockGlass = state.clock.liquidGlass
+                clockGlass = state.clock.glassMeta
             )
             true
         } catch (failure: Throwable) {

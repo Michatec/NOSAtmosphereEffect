@@ -49,7 +49,8 @@ internal object VulkanGlassNative {
         clockOpacity: Float,
         clockUploaded: Boolean,
         clockDepth: Boolean,
-        clockGlass: Boolean
+        /** 0 for a flat face, 1 + frost for glass — ClockOverlayState.glassMeta. */
+        clockGlass: Float
     ): Boolean
 
     external fun nativeRender(handle: Long): Int
@@ -122,7 +123,7 @@ internal object VulkanGlassBridge : VulkanSingleImageBridge<GlassRenderState> {
             clockOpacity = safe.clock.effectiveOpacity(safe.progress),
             clockUploaded = safe.clock.faceUploaded,
             clockDepth = safe.clock.depthEnabled,
-            clockGlass = safe.clock.liquidGlass
+            clockGlass = safe.clock.glassMeta
         )) {
             "The native Vulkan Glass state could not be updated"
         }

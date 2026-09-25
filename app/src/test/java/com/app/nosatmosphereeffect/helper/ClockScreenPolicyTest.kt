@@ -288,11 +288,20 @@ class ClockFaceGeometryTest {
 
     @Test
     fun `every style stays inside its shaping limits`() {
-        // Bounds rather than a single rule, because the set deliberately
-        // spans two shapes: the tall narrow faces and the heavy wide ones.
-        // Both still need a floor, or a face would read as a caption sitting
-        // where a clock should be.
         ClockStyle.entries.forEach { style ->
+            // Only the translucent faces are glass all the way through, and
+            // frost only means anything on those.
+            assertEquals(
+                "${style.id} disagrees about frost",
+                style.treatment == ClockTreatment.TRANSLUCENT,
+                style.usesFrost
+            )
+            assertTrue(
+                "${style.id} has an out-of-range horizontal scale",
+                style.horizontalScale in 0.8f..1f
+            )
+            // Tall and narrow is what reads as a display clock rather than a
+            // caption, but past this it reads as a distortion.
             assertTrue(
                 "${style.id} should be stretched vertically",
                 style.verticalStretch >= 1.3f
@@ -300,14 +309,6 @@ class ClockFaceGeometryTest {
             assertTrue(
                 "${style.id} should not be stretched past legibility",
                 style.verticalStretch <= 2.2f
-            )
-            assertTrue(
-                "${style.id} has an out-of-range horizontal scale",
-                style.horizontalScale in 0.8f..1f
-            )
-            assertTrue(
-                "${style.id} should be a glass face",
-                style.liquidGlass
             )
         }
     }
@@ -327,17 +328,67 @@ class ClockFaceGeometryTest {
     }
 
     @Test
+    fun `each treatment is offered in one row and in two`() {
+        assertEquals(
+            listOf("liquid_glass", "liquid_glass_stacked", "translucent", "translucent_stacked"),
+            ClockStyle.entries.map { it.id }
+        )
+        ClockTreatment.entries.forEach { treatment ->
+            val faces = ClockStyle.entries.filter { it.treatment == treatment }
+            assertEquals("$treatment should have two faces", 2, faces.size)
+            assertEquals(
+                "$treatment should have one of each shape",
+                listOf(false, true),
+                faces.map { it.stacked }
+            )
+        }
+    }
+
+    @Test
+    fun `the original glass face is the default`() {
+        // It is the one that shipped, and the one people have been using.
+        assertEquals("liquid_glass", ClockStyle.DEFAULT.id)
+        assertEquals(ClockTreatment.GLASS, ClockStyle.DEFAULT.treatment)
+        assertTrue(!ClockStyle.DEFAULT.stacked)
+    }
+
+    @Test
+    fun `the shaders can tell the treatments apart`() {
+        // One float carries the treatment and the frost level to both
+        // backends; 3 is the original face and 1 + frost a translucent one.
+        val glass = ClockOverlayState(styleId = "liquid_glass", frost = 0.8f)
+        val translucent = ClockOverlayState(styleId = "translucent", frost = 0.8f)
+        assertEquals(3f, glass.glassMeta, 1e-5f)
+        assertEquals(1.8f, translucent.glassMeta, 1e-5f)
+        // Frost cannot leak into the original face, whatever is stored.
+        assertEquals(glass.glassMeta, glass.copy(frost = 0f).glassMeta, 0f)
+    }
+
+    @Test
     fun `style ids are unique and stable`() {
         val ids = ClockStyle.entries.map { it.id }
         assertEquals(ids.size, ids.toSet().size)
         // Stored in preferences, so renaming one silently resets everyone
         // using it back to the default.
-        listOf("liquid_glass", "liquid_glass_stacked").forEach { id ->
+        listOf(
+            "liquid_glass",
+            "liquid_glass_stacked",
+            "translucent",
+            "translucent_stacked"
+        ).forEach { id ->
             assertEquals(id, ClockStyle.fromId(id).id)
         }
         // The faces this set replaced fall back to the default rather than
         // leaving anyone with no clock at all.
-        listOf("modern", "display", "serif", "mono", "stacked").forEach { retired ->
+        listOf(
+            "modern",
+            "display",
+            "serif",
+            "mono",
+            "stacked",
+            "glass_segment",
+            "glass_block"
+        ).forEach { retired ->
             assertEquals(ClockStyle.DEFAULT.id, ClockStyle.fromId(retired).id)
         }
     }

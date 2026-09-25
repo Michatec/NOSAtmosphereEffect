@@ -10,6 +10,7 @@ import android.opengl.GLUtils
 import android.util.Log
 import androidx.core.graphics.createBitmap
 import com.app.nosatmosphereeffect.helper.AtmosphereClockPolicy
+import com.app.nosatmosphereeffect.helper.ClockBoxPlacement
 import com.app.nosatmosphereeffect.helper.ClockScreen
 import com.app.nosatmosphereeffect.helper.ClockScreenPolicy
 import com.app.nosatmosphereeffect.helper.ClockOverlayState
@@ -139,21 +140,12 @@ class AtmosphereRenderer(
      * clock can request a mask on its own.
      */
     @Volatile var glassBackgroundOnly: Boolean = false
-    @Volatile var clockCenterX: Float = AtmosphereClockPolicy.DEFAULT_CENTER_X
-        set(value) {
-            field = AtmosphereClockPolicy.sanitizeCenterX(value)
-        }
-    @Volatile var clockTop: Float = AtmosphereClockPolicy.DEFAULT_TOP
-        set(value) {
-            field = AtmosphereClockPolicy.sanitizeTop(value)
-        }
-    @Volatile var clockHeight: Float = AtmosphereClockPolicy.DEFAULT_HEIGHT
     /**
-     * Placement (size, per-axis stretch, adaptive shrink) as the shared
-     * overlay state, so this renderer computes the clock rectangle with the
-     * exact rules every other effect and the Vulkan host use. It used to
-     * compute its own from flat fields, and the width/height stretch never
-     * reached it at all — the sliders did nothing on this backend.
+     * Everything about where the clock goes, as the shared overlay state, so
+     * this renderer computes the clock rectangle with the exact rules every
+     * other effect and the Vulkan host use. It used to keep its own flat
+     * centre/top/height fields as well, which is how the per-axis stretch
+     * came to do nothing on this backend.
      */
     @Volatile var clockLayout: ClockOverlayState = ClockOverlayState()
     @Volatile var clockOpacity: Float = AtmosphereClockPolicy.DEFAULT_OPACITY
@@ -168,9 +160,9 @@ class AtmosphereRenderer(
     var clockStyle: ClockStyle
         get() = clockTexture.style
         set(value) { clockTexture.style = value }
-    var clockShowSeconds: Boolean
-        get() = clockTexture.showSeconds
-        set(value) { clockTexture.showSeconds = value }
+    var clockShowDate: Boolean
+        get() = clockTexture.showDate
+        set(value) { clockTexture.showDate = value }
     var clockAnimate: Boolean
         get() = clockTexture.animateDigits
         set(value) {
@@ -783,6 +775,13 @@ class AtmosphereRenderer(
             pendingClockEntry = false
             clockTexture.beginEntry()
         }
+        val safeAspect = if (aspectRatio.isFinite() && aspectRatio > 0f) aspectRatio else 1f
+        val layout = clockLayout
+        // Pushed before the face is rendered: the date is placed in digit-box
+        // widths, so the face has to know both boxes and the screen's shape.
+        clockTexture.clockPlacement = layout.placement
+        clockTexture.datePlacement = layout.datePlacement
+        clockTexture.screenAspect = safeAspect
         val ready = clockEnabled &&
             visibility > 0f &&
             clockOpacity > 0f &&
@@ -813,31 +812,30 @@ class AtmosphereRenderer(
             return
         }
 
-        // Height is expressed as a fraction of screen height; width follows
-        // from the face's own pixel aspect, divided by the screen aspect so
-        // the glyphs are not stretched.
-        // The per-axis stretch is folded in the same way the other effects
-        // do it — see ClockOverlayState.renderHeight for why that needs no
-        // extra uniform.
-        val layout = clockLayout
-        val heightUv = layout.renderHeight
-        val safeAspect = if (aspectRatio.isFinite() && aspectRatio > 0f) aspectRatio else 1f
-        val widthUv = heightUv * layout.renderTextureAspect(clockTexture.aspectRatio) / safeAspect
-        val topUv = layout.renderTop
+        // The stored placement describes the digits; the bitmap around them
+        // holds the animation margin and, when it is on, the date wherever it
+        // was put. Asking the face where its digits sit is what keeps the
+        // clock exactly where the user placed it.
+        val texture = ClockBoxPlacement.textureBox(
+            placement = layout.placement,
+            face = clockTexture.faceBox,
+            screenAspect = safeAspect
+        )
         GLES30.glUniform4f(
             GLES30.glGetUniformLocation(programId, "uClockRect"),
-            clockCenterX - widthUv / 2f,
-            topUv,
-            widthUv,
-            heightUv
+            texture.left,
+            texture.top,
+            texture.width,
+            texture.height
         )
         GLES30.glUniform1f(
             GLES30.glGetUniformLocation(programId, "uClockOpacity"),
             clockOpacity * visibility
         )
+        // 0 for a flat face, 1 + frost for glass — see ClockOverlayState.glassMeta.
         GLES30.glUniform1f(
             GLES30.glGetUniformLocation(programId, "uClockGlass"),
-            if (layout.liquidGlass) 1f else 0f
+            layout.glassMeta
         )
         GLES30.glUniform1f(
             GLES30.glGetUniformLocation(programId, "uClockDepth"),

@@ -65,8 +65,7 @@ internal class VulkanHalftoneHost(
         if (!changed) return
         updateEffectState { state ->
             state.copy(
-                clock = state.clock.copy(
-                    textureAspect = clockOverlay.aspectRatio,
+                clock = clockOverlay.withFaceMetrics(state.clock).copy(
                     faceUploaded = true
                 )
             ).sanitized()
@@ -99,12 +98,7 @@ internal class VulkanHalftoneHost(
                 },
                 // Read from the overlay's own fields, never carried forward
                 // from a snapshot — see uploadClockOnWorker.
-                clock = sanitized.clock.copy(
-                    textureAspect = if (clockOverlay.hasUploadedFace) {
-                        clockOverlay.aspectRatio
-                    } else {
-                        current.clock.textureAspect
-                    },
+                clock = clockOverlay.withFaceMetrics(sanitized.clock, current.clock).copy(
                     faceUploaded = clockOverlay.hasUploadedFace &&
                         sanitized.clock.enabled
                 )
@@ -234,7 +228,7 @@ private class HalftoneBridge(
             clockOpacity = safe.clock.effectiveOpacity(safe.progress),
             clockUploaded = safe.clock.faceUploaded,
             clockDepth = safe.clock.depthEnabled,
-            clockGlass = safe.clock.liquidGlass
+            clockGlass = safe.clock.glassMeta
         )
     }
 

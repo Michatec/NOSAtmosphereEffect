@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import com.app.nosatmosphereeffect.helper.ClockBoxHandle
 import com.app.nosatmosphereeffect.helper.ClockBoxRect
 import kotlin.math.abs
+import kotlin.math.min
 
 /**
  * The frame the user drags to place and size the clock.
@@ -35,11 +36,22 @@ import kotlin.math.abs
 @Composable
 internal fun ClockBoxOverlay(
     box: ClockBoxRect,
+    /**
+     * A second box drawn faintly and not dragged — the clock's while the date
+     * is being placed, and the date's otherwise. Both are on screen at once so
+     * that placing one against the other does not need guesswork.
+     */
+    passiveBox: ClockBoxRect? = null,
     /** True when the clock is exactly centred, which lights the centre guide. */
     centered: Boolean,
     showHandles: Boolean,
-    onBoxChange: (ClockBoxRect, ClockBoxHandle) -> Unit,
-    onDragStarted: () -> Unit,
+    /**
+     * The third argument is true when the gesture grabbed [passiveBox]: the
+     * finger landed on the box that is not selected, so that is the one being
+     * dragged and the caller should follow the selection to it.
+     */
+    onBoxChange: (ClockBoxRect, ClockBoxHandle, Boolean) -> Unit,
+    onDragStarted: (Boolean) -> Unit,
     onDragFinished: () -> Unit,
     onTap: (Offset) -> Unit,
     modifier: Modifier = Modifier
@@ -52,6 +64,7 @@ internal fun ClockBoxOverlay(
     // every movement, so each swipe produced one small step and then had to
     // clear the touch slop all over again.
     val currentBox by rememberUpdatedState(box)
+    val currentPassive by rememberUpdatedState(passiveBox)
     val boxChanged by rememberUpdatedState(onBoxChange)
     val dragStarted by rememberUpdatedState(onDragStarted)
     val dragFinished by rememberUpdatedState(onDragFinished)
@@ -67,14 +80,30 @@ internal fun ClockBoxOverlay(
                 var handle = ClockBoxHandle.MOVE
                 var startBox = ClockBoxRect(0f, 0f, 0f, 0f)
                 var travelled = Offset.Zero
+                var grabbedPassive = false
                 detectDragGestures(
                     onDragStart = { position ->
                         val width = size.width.toFloat()
                         val height = size.height.toFloat()
-                        startBox = currentBox
                         travelled = Offset.Zero
-                        handle = handleAt(position, startBox, width, height, touchSlopPx)
-                        dragStarted()
+                        val activeHandle =
+                            handleAt(position, currentBox, width, height, touchSlopPx)
+                        // The selected box owns the gesture, except when the
+                        // finger is on the other one and not on this one:
+                        // dragging what you are touching is what everyone
+                        // expects, and it saves a trip to the chips to switch.
+                        grabbedPassive = currentPassive?.let { passive ->
+                            activeHandle == ClockBoxHandle.MOVE &&
+                                !touches(position, currentBox, width, height, touchSlopPx) &&
+                                touches(position, passive, width, height, touchSlopPx)
+                        } ?: false
+                        startBox = if (grabbedPassive) currentPassive!! else currentBox
+                        handle = if (grabbedPassive) {
+                            handleAt(position, startBox, width, height, touchSlopPx)
+                        } else {
+                            activeHandle
+                        }
+                        dragStarted(grabbedPassive)
                     },
                     onDragEnd = { dragFinished() },
                     onDragCancel = { dragFinished() }
@@ -90,12 +119,14 @@ internal fun ClockBoxOverlay(
                     travelled += drag
                     boxChanged(
                         startBox.movedBy(handle, travelled.x / width, travelled.y / height),
-                        handle
+                        handle,
+                        grabbedPassive
                     )
                 }
             }
     ) {
         drawCentreGuide(currentBox, centered)
+        currentPassive?.let { drawPassiveBox(it) }
         drawBox(currentBox, showHandles, handleRadiusPx)
     }
 }
@@ -115,6 +146,20 @@ private fun ClockBoxRect.movedBy(handle: ClockBoxHandle, dx: Float, dy: Float): 
     ClockBoxHandle.BOTTOM -> ClockBoxRect(left, top, right, bottom + dy)
 }
 
+/** True when [position] is inside [box] or within [slop] of its edges. */
+private fun touches(
+    position: Offset,
+    box: ClockBoxRect,
+    viewWidth: Float,
+    viewHeight: Float,
+    slop: Float
+): Boolean {
+    return position.x >= box.left * viewWidth - slop &&
+        position.x <= box.right * viewWidth + slop &&
+        position.y >= box.top * viewHeight - slop &&
+        position.y <= box.bottom * viewHeight + slop
+}
+
 private fun handleAt(
     position: Offset,
     box: ClockBoxRect,
@@ -127,12 +172,18 @@ private fun handleAt(
     val right = box.right * viewWidth
     val top = box.top * viewHeight
     val bottom = box.bottom * viewHeight
-    val nearLeft = abs(position.x - left) <= slop
-    val nearRight = abs(position.x - right) <= slop
-    val nearTop = abs(position.y - top) <= slop
-    val nearBottom = abs(position.y - bottom) <= slop
-    val withinRows = position.y >= top - slop && position.y <= bottom + slop
-    val withinColumns = position.x >= left - slop && position.x <= right + slop
+    // The grab zones are capped at a share of the box, so a small one keeps a
+    // middle to drag. At a fixed size they met in the centre of the date's
+    // box and every attempt to move it resized it instead — the only way to
+    // place it was to make it big, move it, and shrink it again.
+    val slopX = min(slop, (right - left) * HANDLE_SHARE)
+    val slopY = min(slop, (bottom - top) * HANDLE_SHARE)
+    val nearLeft = abs(position.x - left) <= slopX
+    val nearRight = abs(position.x - right) <= slopX
+    val nearTop = abs(position.y - top) <= slopY
+    val nearBottom = abs(position.y - bottom) <= slopY
+    val withinRows = position.y >= top - slopY && position.y <= bottom + slopY
+    val withinColumns = position.x >= left - slopX && position.x <= right + slopX
 
     return when {
         nearLeft && nearTop -> ClockBoxHandle.TOP_LEFT
@@ -164,6 +215,19 @@ private fun DrawScope.drawCentreGuide(box: ClockBoxRect, centered: Boolean) {
         start = Offset(x - size.width * 0.04f, y),
         end = Offset(x + size.width * 0.04f, y),
         strokeWidth = 2f
+    )
+}
+
+/** The box that is not being dragged: shown, but visibly not the target. */
+private fun DrawScope.drawPassiveBox(box: ClockBoxRect) {
+    val width = box.width * size.width
+    val height = box.height * size.height
+    if (width <= 0f || height <= 0f) return
+    drawRect(
+        color = PASSIVE_BOX_COLOR,
+        topLeft = Offset(box.left * size.width, box.top * size.height),
+        size = Size(width, height),
+        style = Stroke(width = 1f)
     )
 }
 
@@ -211,8 +275,11 @@ private fun DrawScope.drawBox(box: ClockBoxRect, showHandles: Boolean, handleRad
 }
 
 private const val HANDLE_TOUCH_DP = 28
+/** The most of a box's width or height either grab zone may take. */
+private const val HANDLE_SHARE = 0.28f
 private const val HANDLE_RADIUS_DP = 7
 private val BOX_COLOR = Color.White.copy(alpha = 0.85f)
+private val PASSIVE_BOX_COLOR = Color.White.copy(alpha = 0.3f)
 private val HANDLE_FILL = Color.White.copy(alpha = 0.95f)
 private val HANDLE_BORDER = Color.Black.copy(alpha = 0.35f)
 private val CENTRE_GUIDE_COLOR = Color.White.copy(alpha = 0.28f)

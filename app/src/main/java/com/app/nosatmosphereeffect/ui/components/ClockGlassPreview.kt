@@ -46,6 +46,11 @@ internal fun ClockGlassPreview(
     /** Where the face goes, as fractions of this view. */
     box: ClockBoxRect,
     opacity: Float,
+    /**
+     * The shaders' own glass number: 3 is the original glass face, and
+     * `1 + frost` a translucent one — see [ClockOverlayState.glassMeta].
+     */
+    mode: Float,
     /** Changes whenever [face] has been redrawn in place. */
     faceRevision: Int,
     modifier: Modifier = Modifier
@@ -104,7 +109,8 @@ internal fun ClockGlassPreview(
         val boxTop = box.top * viewHeight
         val boxWidth = box.width * viewWidth
         val boxHeight = box.height * viewHeight
-        val drawGlass = shader != null &&
+        val drawGlass = mode > 0.5f &&
+            shader != null &&
             faceShader != null &&
             glyphs != null &&
             boxWidth > 1f &&
@@ -114,9 +120,13 @@ internal fun ClockGlassPreview(
         if (!drawGlass) {
             paint.shader = wallpaperShader
             drawIntoCanvas { it.nativeCanvas.drawRect(0f, 0f, viewWidth, viewHeight, paint) }
-            // Without the runtime shader the glass cannot be drawn, but the
-            // clock still has to be visible to be positioned.
-            if (shader == null && glyphs != null && opacity > 0f && boxWidth > 1f) {
+            // Either the face is solid, or the runtime shader is unavailable
+            // and the clock still has to be visible to be positioned.
+            if ((mode <= 0.5f || shader == null) &&
+                glyphs != null &&
+                opacity > 0f &&
+                boxWidth > 1f
+            ) {
                 drawImage(
                     image = glyphs.asImageBitmap(),
                     dstOffset = IntOffset(boxLeft.toInt(), boxTop.toInt()),
@@ -144,12 +154,9 @@ internal fun ClockGlassPreview(
         // Measured in face-texture texels, exactly as the wallpaper shader
         // does it, so the bevel is the same width on the same clock rather
         // than a fraction of the box (which made it far softer here).
-        shader.setFloatUniform(
-            "bevel",
-            (BEVEL_TEXELS * boxHeight / glyphs.height).coerceAtLeast(1f)
-        )
-        // The wallpaper offsets in texture UV, where x spans the width and y
-        // the height, so the same UV step is fewer pixels across than down.
+        // The wallpaper shaders work in texture UV, where x spans the width
+        // and y the height, so the same UV step is fewer pixels across than
+        // down. These convert each of their offsets into view pixels.
         val refraction = REFRACTION_FRACTION * boxHeight
         shader.setFloatUniform(
             "refraction",
@@ -157,9 +164,22 @@ internal fun ClockGlassPreview(
             refraction
         )
         shader.setFloatUniform(
-            "frost",
-            FROST_FRACTION * viewWidth,
-            FROST_FRACTION * viewHeight
+            "magnification",
+            MAGNIFICATION * boxWidth,
+            MAGNIFICATION * boxHeight
+        )
+        shader.setFloatUniform("blurMin", FROST_MIN * viewWidth, FROST_MIN * viewHeight)
+        shader.setFloatUniform("blurMax", FROST_MAX * viewWidth, FROST_MAX * viewHeight)
+        shader.setFloatUniform("mode", mode)
+        shader.setFloatUniform(
+            "refractionClassic",
+            CLASSIC_REFRACTION * boxHeight * viewWidth / viewHeight,
+            CLASSIC_REFRACTION * boxHeight
+        )
+        shader.setFloatUniform(
+            "blurClassic",
+            CLASSIC_BLUR * viewWidth,
+            CLASSIC_BLUR * viewHeight
         )
         shader.setFloatUniform("opacity", opacity.coerceIn(0f, 1f))
         paint.shader = shader
@@ -167,20 +187,34 @@ internal fun ClockGlassPreview(
     }
 }
 
-/** The bevel width in face-texture texels; the effect shaders use the same 9. */
-private const val BEVEL_TEXELS = 9f
-private const val REFRACTION_FRACTION = 0.11f
-private const val FROST_FRACTION = 0.0032f
+/** The refraction offset at the silhouette, as a fraction of the clock's height. */
+private const val REFRACTION_FRACTION = 0.030f
+/** How much the glass magnifies what is behind it, at the crown of a stroke. */
+private const val MAGNIFICATION = 0.060f
+/** The original face's refraction and softening, as it has always had them. */
+private const val CLASSIC_REFRACTION = 0.11f
+private const val CLASSIC_BLUR = 0.0032f
+/** The frost blur radius in wallpaper UV, at no frost and at full frost. */
+private const val FROST_MIN = 0.0012f
+private const val FROST_MAX = 0.0110f
 
 private const val GLASS_AGSL = """
 uniform shader wallpaper;
 uniform shader face;
 uniform float2 boxOrigin;
 uniform float2 boxSize;
-uniform float bevel;
 uniform float2 refraction;
-uniform float2 frost;
+uniform float2 refractionClassic;
+uniform float2 magnification;
+uniform float2 blurMin;
+uniform float2 blurMax;
+uniform float2 blurClassic;
+uniform float mode;
 uniform float opacity;
+
+float faceField(float2 coord) {
+    return float(face.eval(coord).a);
+}
 
 half4 main(float2 coord) {
     float3 base = float3(wallpaper.eval(coord).rgb);
@@ -188,48 +222,97 @@ half4 main(float2 coord) {
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
         return half4(half3(base), 1.0);
     }
+
+    // A port of clockGlass in the effect shaders; see the comments there. The
+    // face texture holds a distance field, so the silhouette is reconstructed
+    // here rather than sampled, and the gradient is a true surface direction.
     float4 glyph = float4(face.eval(coord));
-    float body = glyph.a;
-    if (body <= 0.003) {
+    float field = glyph.a;
+    // AGSL has no derivatives, so the field's slope per pixel is measured
+    // directly — which is the same number fwidth would have returned.
+    float2 gradient = 0.5 * float2(
+        faceField(coord + float2(1.0, 0.0)) - faceField(coord - float2(1.0, 0.0)),
+        faceField(coord + float2(0.0, 1.0)) - faceField(coord - float2(0.0, 1.0))
+    );
+    float softness = clamp(length(gradient), 0.0008, 0.25);
+    float coverage = smoothstep(0.5 - softness, 0.5 + softness, field);
+    if (coverage <= 0.002) {
         return half4(half3(base), 1.0);
     }
-
-    // Alpha rises into the glyph, so this points inwards; the outward surface
-    // normal tilts the opposite way.
-    float2 slope = 0.5 * float2(
-        float(face.eval(coord + float2(bevel, 0.0)).a) -
-            float(face.eval(coord - float2(bevel, 0.0)).a),
-        float(face.eval(coord + float2(0.0, bevel)).a) -
-            float(face.eval(coord - float2(0.0, bevel)).a)
-    );
-    float edge = clamp(length(slope) * 2.0, 0.0, 1.0);
-
-    float2 at = coord - slope * refraction;
-    float3 refracted = (
-        2.0 * float3(wallpaper.eval(at).rgb) +
-        float3(wallpaper.eval(at + float2(frost.x, 0.0)).rgb) +
-        float3(wallpaper.eval(at - float2(frost.x, 0.0)).rgb) +
-        float3(wallpaper.eval(at + float2(0.0, frost.y)).rgb) +
-        float3(wallpaper.eval(at - float2(0.0, frost.y)).rgb)
-    ) / 6.0;
-
-    // Light from the upper left (y grows downwards).
-    float3 normal = normalize(float3(-slope * 2.4, 1.0));
+    float2 inward = gradient / max(length(gradient), 1e-5);
+    float depth = clamp((field - 0.5) * 2.0, 0.0, 1.0);
+    float3 tint = glyph.rgb / max(field, 0.001);
     float3 light = normalize(float3(-0.5, -0.72, 0.48));
-    float specular = pow(max(dot(normal, light), 0.0), 22.0) * edge;
-    float rim = smoothstep(0.12, 0.85, edge);
-    float shade = max(-dot(normal.xy, light.xy), 0.0) * edge;
 
-    float3 tint = glyph.rgb / max(glyph.a, 0.001);
-    float3 glass = refracted * 1.05 + float3(0.035);
-    // Coloured glass: the chosen colour tints what shows through, while the
-    // rim and the specular stay white the way real glass reflects. At the old
-    // 0.16 the colour was barely visible, so picking one looked like it did
-    // nothing at all.
-    glass = mix(glass, glass * tint, 0.55);
-    glass = glass + float3(rim * 0.20 + specular * 0.9);
-    glass = glass - float3(shade * 0.14);
-    float3 result = mix(base, clamp(glass, 0.0, 1.0), body * opacity);
+    if (mode >= 2.5) {
+        float edge = 1.0 - smoothstep(0.40, 0.64, depth);
+        float2 slope = inward * 0.5 * edge;
+        float2 at = coord - slope * refractionClassic;
+        float3 refracted = (
+            2.0 * float3(wallpaper.eval(at).rgb) +
+            float3(wallpaper.eval(at + float2(blurClassic.x, 0.0)).rgb) +
+            float3(wallpaper.eval(at - float2(blurClassic.x, 0.0)).rgb) +
+            float3(wallpaper.eval(at + float2(0.0, blurClassic.y)).rgb) +
+            float3(wallpaper.eval(at - float2(0.0, blurClassic.y)).rgb)
+        ) / 6.0;
+        float3 normal = normalize(float3(-slope * 2.4, 1.0));
+        float specular = pow(max(dot(normal, light), 0.0), 22.0) * edge;
+        float rim = smoothstep(0.12, 0.85, edge);
+        float shade = max(-dot(normal.xy, light.xy), 0.0) * edge;
+        float3 glass = refracted * 1.05 + float3(0.035);
+        glass = mix(glass, glass * tint, 0.55);
+        glass = glass + float3(rim * 0.20 + specular * 0.9);
+        glass = glass - float3(shade * 0.14);
+        float3 classic = mix(base, clamp(glass, 0.0, 1.0), coverage * opacity);
+        return half4(half3(classic), 1.0);
+    }
+
+    float frostLevel = clamp(mode - 1.0, 0.0, 1.0);
+    float shoulder = 1.0 - depth;
+    float lift = sqrt(max(1.0 - shoulder * shoulder, 1e-4));
+    float slope = min(shoulder / lift, 6.0);
+    float3 normal = normalize(float3(-inward * slope * 0.62, 1.0));
+
+    float2 bend = inward * shoulder * refraction;
+    float2 magnify = (uv - 0.5) * magnification * depth;
+    float2 at = coord - bend - magnify;
+
+    float3 refracted = float3(wallpaper.eval(at).rgb);
+    if (frostLevel > 0.004) {
+        float2 blur = mix(blurMin, blurMax, frostLevel);
+        float2 diagonal = blur * 0.7;
+        refracted = (
+            2.0 * refracted +
+            float3(wallpaper.eval(at + float2(blur.x, 0.0)).rgb) +
+            float3(wallpaper.eval(at - float2(blur.x, 0.0)).rgb) +
+            float3(wallpaper.eval(at + float2(0.0, blur.y)).rgb) +
+            float3(wallpaper.eval(at - float2(0.0, blur.y)).rgb) +
+            float3(wallpaper.eval(at + diagonal).rgb) +
+            float3(wallpaper.eval(at - diagonal).rgb) +
+            float3(wallpaper.eval(at + float2(diagonal.x, -diagonal.y)).rgb) +
+            float3(wallpaper.eval(at - float2(diagonal.x, -diagonal.y)).rgb)
+        ) / 10.0;
+    }
+
+    float3 glass = mix(refracted, refracted * tint, 0.55);
+    if (frostLevel > 0.004) {
+        float milk = dot(glass, float3(0.2126, 0.7152, 0.0722));
+        glass = mix(glass, tint * (0.55 + 0.45 * milk), frostLevel * 0.92);
+    }
+
+    float3 fill = normalize(float3(0.55, 0.62, 0.55));
+    float facing = dot(normal, light);
+    float turn = shoulder * shoulder * shoulder;
+    float sheen = max(facing, 0.0) * turn;
+    float glint = pow(max(facing, 0.0), 22.0) * shoulder;
+    float bounce = max(dot(normal, fill), 0.0) * turn;
+    float shade = max(-facing, 0.0) * turn;
+    float boundary = smoothstep(0.80, 1.0, shoulder);
+    float polish = 1.0 - 0.75 * frostLevel;
+
+    glass = glass + float3((sheen * 0.22 + glint * 0.5 + bounce * 0.12 + boundary * 0.16) * polish);
+    glass = glass - float3(shade * 0.24 * polish);
+    float3 result = mix(base, clamp(glass, 0.0, 1.0), coverage * opacity);
     return half4(half3(result), 1.0);
 }
 """

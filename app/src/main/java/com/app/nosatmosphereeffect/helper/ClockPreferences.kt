@@ -33,6 +33,7 @@ object ClockPreferences {
             AtmosphereClockPolicy.COLOR_KEY,
             AtmosphereClockPolicy.DEFAULT_COLOR
         )
+        val placement = readPlacement(preferences)
         val requestedScreen = ClockScreen.fromId(
             preferences.readString(
                 AtmosphereClockPolicy.SCREEN_KEY,
@@ -60,37 +61,44 @@ object ClockPreferences {
                 AtmosphereClockPolicy.STYLE_KEY,
                 ClockStyle.DEFAULT.id
             ),
-            showSeconds = preferences.readBoolean(
-                AtmosphereClockPolicy.SECONDS_KEY,
-                AtmosphereClockPolicy.DEFAULT_SECONDS
+            showDate = preferences.readBoolean(
+                AtmosphereClockPolicy.DATE_KEY,
+                AtmosphereClockPolicy.DEFAULT_DATE
             ),
             animate = preferences.readBoolean(
                 AtmosphereClockPolicy.ANIMATE_KEY,
                 AtmosphereClockPolicy.DEFAULT_ANIMATE
             ),
-            centerX = preferences.readFloat(
-                AtmosphereClockPolicy.CENTER_X_KEY,
-                AtmosphereClockPolicy.DEFAULT_CENTER_X
+            centerX = placement.centerX,
+            top = placement.top,
+            height = placement.height,
+            widthScale = placement.widthScale,
+            dateCenterX = preferences.readFloat(
+                AtmosphereClockPolicy.DATE_CENTER_X_KEY,
+                AtmosphereClockPolicy.DEFAULT_DATE_CENTER_X
             ),
-            top = preferences.readFloat(
-                AtmosphereClockPolicy.TOP_KEY,
-                AtmosphereClockPolicy.DEFAULT_TOP
+            dateTop = preferences.readFloat(
+                AtmosphereClockPolicy.DATE_TOP_KEY,
+                AtmosphereClockPolicy.DEFAULT_DATE_TOP
             ),
-            height = preferences.readFloat(
-                AtmosphereClockPolicy.HEIGHT_KEY,
-                AtmosphereClockPolicy.DEFAULT_HEIGHT
+            dateHeight = preferences.readFloat(
+                AtmosphereClockPolicy.DATE_HEIGHT_KEY,
+                AtmosphereClockPolicy.DEFAULT_DATE_HEIGHT
             ),
-            widthScale = preferences.readFloat(
-                AtmosphereClockPolicy.WIDTH_SCALE_KEY,
-                AtmosphereClockPolicy.DEFAULT_WIDTH_SCALE
+            dateWidthScale = preferences.readFloat(
+                AtmosphereClockPolicy.DATE_WIDTH_SCALE_KEY,
+                AtmosphereClockPolicy.DEFAULT_DATE_WIDTH_SCALE
             ),
-            heightScale = preferences.readFloat(
-                AtmosphereClockPolicy.HEIGHT_SCALE_KEY,
-                AtmosphereClockPolicy.DEFAULT_HEIGHT_SCALE
-            ),
+            // Always 1: readPlacement has already folded any stored stretch
+            // into the placement itself.
+            heightScale = 1f,
             opacity = preferences.readFloat(
                 AtmosphereClockPolicy.OPACITY_KEY,
                 AtmosphereClockPolicy.DEFAULT_OPACITY
+            ),
+            frost = preferences.readFloat(
+                AtmosphereClockPolicy.FROST_KEY,
+                AtmosphereClockPolicy.DEFAULT_FROST
             ),
             requestedColor = requestedColor,
             // Left unresolved on purpose: deriving the wallpaper tint decodes
@@ -110,6 +118,65 @@ object ClockPreferences {
             lockedProgress = lockedProgress,
             unlockedProgress = unlockedProgress
         ).sanitized()
+    }
+
+    /**
+     * The clock's stored placement, converted if it predates the change from
+     * storing the face texture's rectangle to storing the digits' own box.
+     *
+     * The conversion is applied on every read rather than written back: this
+     * runs in the wallpaper's process, where a write would race the settings
+     * process, and it is idempotent — the calibration screen stamps the new
+     * version the next time the user drags anything.
+     */
+    fun readPlacement(preferences: SharedPreferences): ClockPlacement {
+        // The vertical stretch is folded in here rather than carried onwards.
+        // It was the second of two size sliders, which the draggable box
+        // replaced; leaving it as a separate multiplier meant the two backends
+        // could apply it at different points in the same sum. The fold is
+        // exact — the width is a ratio of the height, so dividing the ratio by
+        // whatever multiplies the height leaves the shape untouched.
+        val stretch = preferences.readFloat(
+            AtmosphereClockPolicy.HEIGHT_SCALE_KEY,
+            AtmosphereClockPolicy.DEFAULT_HEIGHT_SCALE
+        ).takeIf { it.isFinite() && it > 0f } ?: 1f
+        val stored = ClockPlacement(
+            centerX = preferences.readFloat(
+                AtmosphereClockPolicy.CENTER_X_KEY,
+                AtmosphereClockPolicy.DEFAULT_CENTER_X
+            ),
+            top = preferences.readFloat(
+                AtmosphereClockPolicy.TOP_KEY,
+                AtmosphereClockPolicy.DEFAULT_TOP
+            ),
+            height = AtmosphereClockPolicy.sanitizeHeight(
+                preferences.readFloat(
+                    AtmosphereClockPolicy.HEIGHT_KEY,
+                    AtmosphereClockPolicy.DEFAULT_HEIGHT
+                ) * stretch
+            ),
+            widthScale = AtmosphereClockPolicy.sanitizeAxisScale(
+                preferences.readFloat(
+                    AtmosphereClockPolicy.WIDTH_SCALE_KEY,
+                    AtmosphereClockPolicy.DEFAULT_WIDTH_SCALE
+                ) / stretch
+            )
+        )
+        // Nothing stored at all is a fresh install, not an old one: the
+        // defaults already describe the digits, so converting them would
+        // shrink the clock for someone who has never touched it.
+        val untouched = !preferences.contains(AtmosphereClockPolicy.HEIGHT_KEY) &&
+            !preferences.contains(AtmosphereClockPolicy.TOP_KEY)
+        val version = if (untouched) {
+            AtmosphereClockPolicy.GEOMETRY_VERSION
+        } else {
+            preferences.readInt(AtmosphereClockPolicy.GEOMETRY_VERSION_KEY, 1)
+        }
+        return if (version < AtmosphereClockPolicy.GEOMETRY_VERSION) {
+            AtmosphereClockPolicy.migrateGeometry(stored)
+        } else {
+            stored
+        }
     }
 
     private fun SharedPreferences.readBoolean(key: String, fallback: Boolean): Boolean {

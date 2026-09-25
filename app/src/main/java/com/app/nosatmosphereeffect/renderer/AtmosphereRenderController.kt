@@ -165,14 +165,19 @@ class AtmosphereRenderController(
                 clockEnabled = resolvedClock,
                 clockDepthEnabled = safe.depthEnabled,
                 clockStyleId = safe.styleId,
-                clockShowSeconds = safe.showSeconds,
+                clockShowDate = safe.showDate,
                 clockAnimate = safe.animate,
                 clockCenterX = safe.centerX,
                 clockTop = safe.top,
                 clockHeight = safe.height,
                 clockWidthScale = safe.widthScale,
                 clockHeightScale = safe.heightScale,
+                clockDateCenterX = safe.dateCenterX,
+                clockDateTop = safe.dateTop,
+                clockDateHeight = safe.dateHeight,
+                clockDateWidthScale = safe.dateWidthScale,
                 clockOpacity = safe.opacity,
+                clockFrost = safe.frost,
                 clockColor = ClockPalette.resolve(
                     requestedClockColor,
                     resolvedAutoClockColor
@@ -185,7 +190,7 @@ class AtmosphereRenderController(
             state
         }
         applyState(snapshot)
-        clockPump.configure(resolvedClock, safe.showSeconds)
+        clockPump.configure(resolvedClock)
         if (resolvedClock && ClockPalette.isAuto(requestedClockColor)) {
             refreshAutoClockColor()
         }
@@ -614,13 +619,10 @@ class AtmosphereRenderController(
         clockEnabled = state.clockEnabled
         clockDepthEnabled = state.clockDepthEnabled
         clockStyle = state.clockStyle
-        clockShowSeconds = state.clockShowSeconds
+        clockShowDate = state.clockShowDate
         clockAnimate = state.clockAnimate
         clockColor = state.clockColor
         clockHourFormat = state.clockHourFormat
-        clockCenterX = state.clockCenterX
-        clockTop = state.clockTop
-        clockHeight = state.clockHeight
         clockLayout = state.clockOverlay()
         clockOpacity = state.clockOpacity
         clockScreen = state.clockScreen

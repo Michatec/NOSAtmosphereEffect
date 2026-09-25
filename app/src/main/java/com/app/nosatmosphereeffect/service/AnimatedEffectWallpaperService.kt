@@ -105,10 +105,9 @@ abstract class AnimatedEffectWallpaperService<R : Any> : GLWallpaperService() {
 
     /**
      * Whether the clock may show: it is single-image only (a position
-     * calibrated against one photo is wrong for the next). Read defensively,
-     * like SubjectIsolationBackendPolicy — the clock is decoration, and a
-     * failure deciding the playlist mode must not abort configuring the
-     * effect itself.
+     * calibrated against one photo is wrong for the next). Read defensively —
+     * the clock is decoration, and a failure deciding the playlist mode must
+     * not abort configuring the effect itself.
      */
     protected fun isClockSingleImageMode(): Boolean = runCatching {
         !PlaylistModeManager.isPlaylistMode(applicationContext)
